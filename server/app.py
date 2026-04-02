@@ -1,12 +1,5 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree.
-
 """
-FastAPI application for the Search Env Environment.
-
+FastAPI application for the Search RL Environment.
 This module creates an HTTP server that exposes the SearchEnvironment
 over HTTP and WebSocket endpoints, compatible with EnvClient.
 
@@ -37,19 +30,35 @@ except Exception as e:  # pragma: no cover
 
 try:
     from ..models import SearchAction, SearchObservation
-    from .environment import SearchEnvironment
+    from .environment import (
+        SearchEnvironment,
+        create_sample_corpus,
+        create_sample_tasks,
+    )
 except ImportError:
     from models import SearchAction, SearchObservation
-    from server.environment import SearchEnvironment
+    from server.environment import (
+        SearchEnvironment,
+        create_sample_corpus,
+        create_sample_tasks,
+    )
+
+
+def create_environment() -> SearchEnvironment:
+    """Factory function to create a SearchEnvironment with sample data."""
+    corpus = create_sample_corpus()
+    tasks = create_sample_tasks()
+    return SearchEnvironment(corpus=corpus, tasks=tasks)
 
 
 # Create the app with web interface and README integration
+# Using factory mode for concurrent sessions
 app = create_app(
-    SearchEnvironment,
+    create_environment,  # Factory function for concurrent sessions
     SearchAction,
     SearchObservation,
     env_name="search_env",
-    max_concurrent_envs=1,  # increase this number to allow more concurrent WebSocket sessions
+    max_concurrent_envs=4,  # Allow multiple concurrent WebSocket sessions
 )
 
 

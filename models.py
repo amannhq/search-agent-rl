@@ -291,6 +291,9 @@ class SearchEnvConfig(BaseModel):
         default=4.0,
         description="F-beta parameter (paper-aligned default emphasizes recall)",
     )
+    f_beta_weight: float = Field(
+        default=0.7, description="Weight for the F-beta outcome term"
+    )
     answer_reward_weight: float = Field(
         default=1.0, description="Weight for answer bonus"
     )
@@ -298,7 +301,11 @@ class SearchEnvConfig(BaseModel):
         default=True, description="Include trajectory recall"
     )
     trajectory_reward_weight: float = Field(
-        default=0.5, description="Weight for trajectory"
+        default=0.3, description="Weight for the trajectory recall term"
+    )
+    successful_trajectory_floor: float = Field(
+        default=0.01,
+        description="Small positive floor for completed trajectories after penalties",
     )
     use_beta_schedule: bool = Field(
         default=False,

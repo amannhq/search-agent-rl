@@ -32,6 +32,7 @@ class RewardMetrics:
     max_tokens: int = 32768
 
     # Component rewards
+    f_beta_reward: float = 0.0
     trajectory_reward: float = 0.0
     answer_reward: float = 0.0
     efficiency_reward: float = 0.0
@@ -39,6 +40,10 @@ class RewardMetrics:
     # Penalties
     turn_penalty: float = 0.0
     prune_penalty: float = 0.0
+
+    # Pre/post clamp bookkeeping
+    pre_penalty_reward: float = 0.0
+    reward_floor: float = 0.0
 
     # Final reward
     total_reward: float = 0.0
@@ -97,18 +102,20 @@ class RewardCalculator:
     """
     Calculate rewards for the Search RL Environment.
 
-    - F-beta score for trajectory quality
+    - Weighted F-beta outcome score
     - Answer bonus for finding the answer
-    - Efficiency bonus for using fewer resources
+    - Trajectory recall process reward
     - Penalties for degenerate behavior
     """
 
     def __init__(
         self,
         beta: float = 4.0,
+        f_beta_weight: float = 0.7,
         answer_reward_weight: float = 1.0,
-        trajectory_reward_weight: float = 0.5,
-        efficiency_reward_weight: float = 0.1,
+        trajectory_reward_weight: float = 0.3,
+        efficiency_reward_weight: float = 0.0,
+        successful_trajectory_floor: float = 0.01,
         use_trajectory_reward: bool = True,
         prune_penalty_threshold: int = 3,
         prune_penalty_per_excess: float = 0.1,
@@ -122,9 +129,11 @@ class RewardCalculator:
 
         Args:
             beta: F-beta parameter. >1 favors recall, <1 favors precision
+            f_beta_weight: Weight for the F-beta outcome component
             answer_reward_weight: Weight for answer bonus
             trajectory_reward_weight: Weight for trajectory recall component
-            efficiency_reward_weight: Weight for efficiency bonus
+            efficiency_reward_weight: Weight for efficiency diagnostics
+            successful_trajectory_floor: Minimum reward for successful completions
             use_trajectory_reward: Whether to include trajectory recall
             prune_penalty_threshold: Consecutive prunes before penalty
             prune_penalty_per_excess: Penalty per excess prune
@@ -134,9 +143,11 @@ class RewardCalculator:
             turn_penalty_max: Maximum turn penalty
         """
         self.beta = beta
+        self.f_beta_weight = f_beta_weight
         self.answer_reward_weight = answer_reward_weight
         self.trajectory_reward_weight = trajectory_reward_weight
         self.efficiency_reward_weight = efficiency_reward_weight
+        self.successful_trajectory_floor = successful_trajectory_floor
         self.use_trajectory_reward = use_trajectory_reward
         self.prune_penalty_threshold = prune_penalty_threshold
         self.prune_penalty_per_excess = prune_penalty_per_excess
@@ -380,7 +391,8 @@ class RewardCalculator:
             context_texts, gold_answer
         )
 
-        # Efficiency
+        # Efficiency is still tracked for diagnostics, but not used in the
+        # final reward formula.
         efficiency = self.compute_efficiency_reward(
             steps_used, max_steps, tokens_used, max_tokens
         )
@@ -391,6 +403,7 @@ class RewardCalculator:
         metrics.prune_penalty = self.compute_prune_penalty(tracker.consecutive_prunes)
 
         # Component rewards
+        metrics.f_beta_reward = metrics.f_beta * self.f_beta_weight
         metrics.trajectory_reward = (
             trajectory_recall * self.trajectory_reward_weight
             if self.use_trajectory_reward
@@ -400,13 +413,18 @@ class RewardCalculator:
             self.answer_reward_weight if metrics.answer_found_in_context else 0.0
         )
 
-        # Total reward
-        total = metrics.f_beta + metrics.trajectory_reward + metrics.answer_reward
-        total += metrics.efficiency_reward
-        total -= metrics.turn_penalty + metrics.prune_penalty
+        # Total reward: clamp(0.7 * F_beta + 0.3 * r_traj + r_fa - penalties, floor, pre_penalty_reward)
+        metrics.pre_penalty_reward = (
+            metrics.f_beta_reward + metrics.trajectory_reward + metrics.answer_reward
+        )
+        metrics.reward_floor = self.successful_trajectory_floor
 
-        # Floor at 0 for completed episodes
-        metrics.total_reward = max(0.0, total)
+        total = metrics.pre_penalty_reward
+        total -= metrics.turn_penalty + metrics.prune_penalty
+        metrics.total_reward = min(
+            metrics.pre_penalty_reward,
+            max(metrics.reward_floor, total),
+        )
 
         return metrics
 

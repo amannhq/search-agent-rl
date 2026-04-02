@@ -81,8 +81,10 @@ class SearchEnvironment(Environment):
         # Reward calculator
         self.reward_calculator = RewardCalculator(
             beta=self.config.beta,
+            f_beta_weight=self.config.f_beta_weight,
             answer_reward_weight=self.config.answer_reward_weight,
             trajectory_reward_weight=self.config.trajectory_reward_weight,
+            successful_trajectory_floor=self.config.successful_trajectory_floor,
             use_trajectory_reward=self.config.use_trajectory_reward,
         )
         self.beta_scheduler = (

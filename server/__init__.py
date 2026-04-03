@@ -1,14 +1,9 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree.
-
 """Search RL Environment Server Components."""
 
 from .environment import SearchEnvironment, create_sample_corpus, create_sample_tasks
 from .retrieval import BM25Index, DocumentCorpus
 from .rewards import BetaScheduler, RewardCalculator, RewardMetrics, TrajectoryTracker
+from .web_retrieval import SerperWebSearchBackend
 
 __all__ = [
     # Environment
@@ -18,6 +13,7 @@ __all__ = [
     # Retrieval
     "BM25Index",
     "DocumentCorpus",
+    "SerperWebSearchBackend",
     # Rewards
     "RewardCalculator",
     "RewardMetrics",

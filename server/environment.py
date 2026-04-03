@@ -74,7 +74,7 @@ class SearchEnvironment(Environment):
         """
         super().__init__()
         self.config = config or SearchEnvConfig()
-        self.corpus = corpus or DocumentCorpus()
+        self.corpus = corpus or DocumentCorpus(config=self.config.model_dump())
         self.tasks = tasks or []
         self._task_index = 0
 
@@ -105,6 +105,9 @@ class SearchEnvironment(Environment):
         self._context_chunks: Dict[str, Chunk] = {}  # chunk_id -> Chunk
         self._context_token_count: int = 0
         self._chunks_seen: Set[str] = set()  # For deduplication
+        self._seen_texts: List[
+            str
+        ] = []  # Track snippet/content for content-based matching
         self._done: bool = False
         self._last_metrics: Optional[RewardMetrics] = None
 
@@ -130,7 +133,8 @@ class SearchEnvironment(Environment):
         return task
 
     def _get_budget_warning(self) -> Optional[str]:
-        """Get budget warning message if applicable."""
+        if self.config.max_context_tokens <= 0:
+            return None
         usage = self._context_token_count / self.config.max_context_tokens
 
         if usage >= self.config.hard_budget_threshold:
@@ -186,6 +190,7 @@ class SearchEnvironment(Environment):
             max_steps=self.config.max_steps,
             queries_issued=list(self._tracker.queries),
             chunks_seen_count=len(self._chunks_seen),
+            search_backend=self.corpus.search_backend,
             done=self._done,
             reward=reward,
         )
@@ -217,6 +222,7 @@ class SearchEnvironment(Environment):
         self._context_chunks.clear()
         self._context_token_count = 0
         self._chunks_seen.clear()
+        self._seen_texts.clear()
         self._done = False
         self._last_metrics = None
         self._reset_rubric()
@@ -277,7 +283,10 @@ class SearchEnvironment(Environment):
             )
 
         # Check budget for non-prune/answer actions
-        budget_usage = self._context_token_count / self.config.max_context_tokens
+        if self.config.max_context_tokens > 0:
+            budget_usage = self._context_token_count / self.config.max_context_tokens
+        else:
+            budget_usage = 0.0
         if (
             budget_usage >= self.config.hard_budget_threshold
             and action.action_type not in [ActionType.PRUNE, ActionType.ANSWER]
@@ -331,22 +340,30 @@ class SearchEnvironment(Environment):
         # Determine chunks to exclude (for deduplication)
         exclude_ids = self._chunks_seen if self.config.deduplicate_searches else None
 
-        # Search corpus
-        results = self.corpus.search(
-            query=query,
-            top_k=top_k,
-            exclude_ids=exclude_ids,
-            snippet_length=self.config.snippet_length,
-        )
+        try:
+            results = self.corpus.search(
+                query=query,
+                top_k=top_k,
+                exclude_ids=exclude_ids,
+                snippet_length=self.config.snippet_length,
+            )
+        except Exception as exc:
+            return {"error": str(exc)}
 
         # Track results
         chunk_ids = [r.chunk_id for r in results]
         self._tracker.record_search(query, chunk_ids)
         self._chunks_seen.update(chunk_ids)
 
+        # Track snippets for content-based matching (web search mode)
+        for r in results:
+            if r.snippet:
+                self._seen_texts.append(r.snippet)
+
         # Create result
         search_result = SearchResult(
             query=query,
+            backend=self.corpus.search_backend,
             results=results,
             total_found=len(results),
         )
@@ -367,7 +384,10 @@ class SearchEnvironment(Environment):
             if chunk_id in self._context_chunks:
                 continue
 
-            chunk = self.corpus.get_chunk(chunk_id)
+            try:
+                chunk = self.corpus.get_chunk(chunk_id)
+            except Exception as exc:
+                return {"error": str(exc)}
             if chunk is None:
                 continue
 
@@ -388,6 +408,7 @@ class SearchEnvironment(Environment):
         self._chunks_seen.update(chunk_ids)
 
         read_result = ReadResult(
+            backend=self.corpus.search_backend,
             chunks=chunks_added,
             tokens_added=tokens_added,
             budget_exceeded=budget_exceeded,
@@ -448,6 +469,7 @@ class SearchEnvironment(Environment):
             max_steps=self.config.max_steps,
             tokens_used=self._context_token_count,
             max_tokens=self.config.max_context_tokens,
+            all_seen_texts=self._seen_texts if self._seen_texts else None,
         )
 
         self._last_metrics = metrics
@@ -462,6 +484,14 @@ class SearchEnvironment(Environment):
             beta_used=metrics.beta,
             answer_correct=metrics.answer_correct,
             answer_found_in_context=metrics.answer_found_in_context,
+            answer_similarity=metrics.answer_similarity,
+            f_beta_reward=metrics.f_beta_reward,
+            trajectory_reward=metrics.trajectory_reward,
+            answer_reward=metrics.answer_reward,
+            turn_penalty=metrics.turn_penalty,
+            prune_penalty=metrics.prune_penalty,
+            pre_penalty_reward=metrics.pre_penalty_reward,
+            reward_floor=metrics.reward_floor,
         )
 
         return answer_result.model_dump()
@@ -485,15 +515,20 @@ class SearchEnvironment(Environment):
             return
 
         if self.beta_scheduler is not None and training_step is not None:
-            self.reward_calculator.beta = self.beta_scheduler.get_beta(int(training_step))
+            self.reward_calculator.beta = self.beta_scheduler.get_beta(
+                int(training_step)
+            )
             return
 
         self.reward_calculator.beta = self.config.beta
 
 
-def create_sample_corpus() -> DocumentCorpus:
+def create_sample_corpus(
+    config: Optional[SearchEnvConfig] = None,
+) -> DocumentCorpus:
     """Create a sample corpus for testing."""
-    corpus = DocumentCorpus()
+    config_dict = config.model_dump() if config is not None else None
+    corpus = DocumentCorpus(config=config_dict)
 
     # Sample documents about companies and acquisitions
     documents = [
@@ -554,42 +589,134 @@ def create_sample_corpus() -> DocumentCorpus:
 
 
 def create_sample_tasks() -> List[SearchTask]:
-    """Create sample tasks for testing."""
+    """
+    Create sample tasks for testing.
+
+    Tasks follow the Context-1 paper style:
+    - Obfuscated clues (don't mention entities directly)
+    - Short, verifiable answers (exist verbatim in documents)
+    - Multi-constraint questions requiring decomposition
+    """
     tasks = [
+        # Task 1: Single-hop, easy (1 constraint)
+        # Answer should be findable in Instagram Wikipedia article
         SearchTask(
             task_id="task_1",
-            question="Who founded the company that acquired Instagram, and where was he born?",
-            gold_answer="Mark Zuckerberg was born in White Plains, New York",
-            gold_chunk_ids=["doc_instagram_chunk_0", "doc_facebook_chunk_0"],
+            question=(
+                "A photo-sharing application was acquired by a major social network "
+                "in April 2012 for approximately one billion dollars. "
+                "In what year was this application originally launched?"
+            ),
+            gold_answer="2010",
+            gold_chunk_ids=["doc_instagram_chunk_0"],
+            difficulty="easy",
+            num_hops=1,
+            domain="tech",
+            clues=[
+                "Photo-sharing app acquired in April 2012 for ~$1 billion",
+                "Need the original launch year",
+            ],
+        ),
+        # Task 2: Single-hop, easy (1 constraint)
+        # Answer should be findable in Facebook/Meta Wikipedia article
+        SearchTask(
+            task_id="task_2",
+            question=(
+                "A social networking company founded at Harvard University later "
+                "acquired both Instagram and WhatsApp. In what year was this "
+                "company itself founded?"
+            ),
+            gold_answer="2004",
+            gold_chunk_ids=["doc_facebook_chunk_0"],
+            difficulty="easy",
+            num_hops=1,
+            domain="tech",
+            clues=[
+                "Social network founded at Harvard",
+                "Acquired Instagram and WhatsApp",
+                "Need the founding year",
+            ],
+        ),
+        # Task 3: Two-hop, medium (2 constraints, comparison)
+        # Requires finding both acquisition amounts
+        SearchTask(
+            task_id="task_3",
+            question=(
+                "A social media giant acquired a photo-sharing app for around "
+                "$1 billion and later acquired a messaging service for a much "
+                "larger sum. How many billions of dollars did the messaging "
+                "service acquisition cost?"
+            ),
+            gold_answer="19",
+            gold_chunk_ids=["doc_whatsapp_chunk_0"],
             difficulty="medium",
             num_hops=2,
             domain="tech",
             clues=[
-                "A social media company acquired Instagram",
-                "The founder of that company was born in a specific city",
+                "Photo app acquired for ~$1 billion (Instagram)",
+                "Messaging service acquired for larger amount (WhatsApp)",
+                "Need the WhatsApp acquisition price in billions",
             ],
         ),
+        # Task 4: Two-hop, medium (person + location)
+        # Requires finding who founded Facebook, then their birthplace
         SearchTask(
-            task_id="task_2",
-            question="How much did Facebook pay for WhatsApp compared to Instagram?",
-            gold_answer="Facebook paid $19 billion for WhatsApp and $1 billion for Instagram",
-            gold_chunk_ids=["doc_instagram_chunk_0", "doc_whatsapp_chunk_0"],
-            difficulty="easy",
+            task_id="task_4",
+            question=(
+                "The founder of a social network that was launched from a Harvard "
+                "dormitory in 2004 was born in a city in New York state. "
+                "What is the name of that city?"
+            ),
+            gold_answer="White Plains",
+            gold_chunk_ids=["doc_facebook_chunk_0"],
+            difficulty="medium",
             num_hops=2,
             domain="tech",
             clues=[
-                "Facebook acquired Instagram for a certain amount",
-                "Facebook acquired WhatsApp for a different amount",
+                "Social network launched from Harvard in 2004",
+                "Founder born in a New York state city",
+                "Need the city name",
             ],
         ),
+        # Task 5: Two-hop, medium (acquisition + founder origin)
         SearchTask(
-            task_id="task_3",
-            question="Which company did Elon Musk acquire, and when did it go public?",
-            gold_answer="Elon Musk acquired Twitter, which went public in November 2013",
+            task_id="task_5",
+            question=(
+                "A messaging application that was acquired for $19 billion was "
+                "co-founded by two engineers. One of them was born in Ukraine. "
+                "What is the first name of the Ukrainian-born co-founder?"
+            ),
+            gold_answer="Jan",
+            gold_chunk_ids=["doc_whatsapp_chunk_0"],
+            difficulty="medium",
+            num_hops=2,
+            domain="tech",
+            clues=[
+                "Messaging app acquired for $19 billion (WhatsApp)",
+                "Co-founded by two engineers",
+                "One born in Ukraine",
+                "Need the first name",
+            ],
+        ),
+        # Task 6: Single-hop, easy (recent event)
+        # Twitter/X acquisition
+        SearchTask(
+            task_id="task_6",
+            question=(
+                "A billionaire entrepreneur completed the acquisition of a major "
+                "social media platform in October 2022, taking it private. "
+                "How many billions of dollars was the acquisition price?"
+            ),
+            gold_answer="44",
             gold_chunk_ids=["doc_twitter_chunk_0"],
             difficulty="easy",
             num_hops=1,
             domain="tech",
+            clues=[
+                "Social media platform acquired October 2022",
+                "Taken private by billionaire",
+                "Need the price in billions",
+            ],
         ),
     ]
 

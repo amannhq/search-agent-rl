@@ -10,8 +10,10 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 try:
     from ..models import Chunk, ChunkSummary
+    from .web_retrieval import SerperWebSearchBackend
 except ImportError:
     from models import Chunk, ChunkSummary
+    from server.web_retrieval import SerperWebSearchBackend
 
 
 class BM25Index:
@@ -239,6 +241,22 @@ class DocumentCorpus:
         self.documents: Dict[str, List[str]] = defaultdict(
             list
         )  # doc_id -> [chunk_ids]
+        self.search_backend = str(self.config.get("search_backend", "sample")).lower()
+        self.web_backend: Optional[SerperWebSearchBackend] = None
+        if self.search_backend == "serper":
+            self.web_backend = SerperWebSearchBackend(
+                api_key=self.config.get("serper_api_key"),
+                api_url=self.config.get(
+                    "serper_api_url", "https://google.serper.dev/search"
+                ),
+                gl=self.config.get("serper_gl", "us"),
+                hl=self.config.get("serper_hl", "en"),
+                timeout_s=float(self.config.get("web_request_timeout_s", 10.0)),
+                max_read_chars=int(self.config.get("web_max_read_chars", 1500)),
+                user_agent=self.config.get(
+                    "web_user_agent", "search-env/0.1 (+https://serper.dev)"
+                ),
+            )
 
     def add_document(
         self,
@@ -338,6 +356,9 @@ class DocumentCorpus:
         Returns:
             List of ChunkSummary objects
         """
+        if self.web_backend is not None:
+            return self.web_backend.search(query, top_k, exclude_ids, snippet_length)
+
         results = self.index.search(query, top_k, exclude_ids)
         summaries = []
 
@@ -350,11 +371,30 @@ class DocumentCorpus:
 
     def get_chunk(self, chunk_id: str) -> Optional[Chunk]:
         """Get a chunk by ID."""
-        return self.index.get_chunk(chunk_id)
+        chunk = self.index.get_chunk(chunk_id)
+        if chunk is not None:
+            return chunk
+
+        if self.web_backend is None:
+            return None
+
+        chunk = self.web_backend.get_chunk(chunk_id)
+        if chunk is None:
+            return None
+
+        self.index.add_chunk(chunk)
+        if chunk.chunk_id not in self.documents[chunk.document_id]:
+            self.documents[chunk.document_id].append(chunk.chunk_id)
+        return chunk
 
     def get_chunks(self, chunk_ids: List[str]) -> List[Chunk]:
         """Get multiple chunks."""
-        return self.index.get_chunks(chunk_ids)
+        chunks: List[Chunk] = []
+        for chunk_id in chunk_ids:
+            chunk = self.get_chunk(chunk_id)
+            if chunk is not None:
+                chunks.append(chunk)
+        return chunks
 
     def get_document_chunks(self, doc_id: str) -> List[Chunk]:
         """Get all chunks for a document."""

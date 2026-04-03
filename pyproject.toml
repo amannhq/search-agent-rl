@@ -18,14 +18,11 @@ dependencies = [
     # install from github
     # "openenv-core[core] @ git+https://github.com/meta-pytorch/OpenEnv.git",
     "openenv-core[core]>=0.2.2",
+    "openai>=1.0.0",
+    "python-dotenv>=1.0.0",
     # Environment-specific dependencies
-    # Add all dependencies needed for your environment here
-    # Examples:
-    # "numpy>=1.19.0",
-    # "torch>=2.0.0",
-    # "gymnasium>=0.29.0",
-    # "openspiel>=1.0.0",
-    # "smolagents>=1.22.0,<2",
+    # HTML content extraction for web search
+    "trafilatura>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -38,6 +35,7 @@ dev = [
 # Server entry point - enables running via: uv run --project . server
 # or: python -m search_env.server.app
 server = "search_env.server.app:main"
+inference = "search_env.inference:cli"
 
 [tool.setuptools]
 include-package-data = true

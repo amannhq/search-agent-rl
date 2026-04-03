@@ -7,6 +7,7 @@ from difflib import SequenceMatcher
 from dataclasses import dataclass, field
 from typing import Iterable, List, Optional, Set
 
+
 @dataclass
 class RewardMetrics:
     """Metrics computed for reward calculation."""
@@ -258,10 +259,10 @@ class RewardCalculator:
         gold_answer: str,
     ) -> bool:
         """
-        Check whether the final context includes the gold answer directly.
+        Check whether the final context includes key parts of the gold answer.
 
-        This rewards retrieved evidence directly rather than relying only on the
-        model's final answer text.
+        Uses a lenient matching approach: extracts key entities/facts from
+        the gold answer and checks if they appear in the context.
         """
         if not context_texts:
             return False
@@ -270,8 +271,81 @@ class RewardCalculator:
         if not gold_normalized:
             return False
 
-        for text in context_texts:
-            if gold_normalized in self._normalize_text(text):
+        # Extract key phrases from gold answer (split on common separators)
+        # This handles cases like "Mark Zuckerberg was born in White Plains, New York"
+        # where we want to find both "mark zuckerberg" and "white plains"
+        import re
+
+        key_phrases = []
+
+        # Extract proper nouns and key facts (words that aren't stopwords)
+        stopwords = {
+            "a",
+            "an",
+            "the",
+            "was",
+            "were",
+            "is",
+            "are",
+            "in",
+            "on",
+            "at",
+            "for",
+            "to",
+            "of",
+            "and",
+            "or",
+            "which",
+            "that",
+            "who",
+            "whom",
+            "born",
+            "paid",
+            "acquired",
+            "went",
+            "public",
+            "founded",
+            "compared",
+        }
+
+        # Find capitalized phrases or numbers with context
+        words = gold_normalized.split()
+        current_phrase = []
+        for word in words:
+            # Keep numbers, dollar amounts, years, or multi-word names
+            if (
+                word.replace("$", "").replace(",", "").replace(".", "").isdigit()
+                or word not in stopwords
+                or len(word) > 3
+            ):
+                current_phrase.append(word)
+            else:
+                if current_phrase:
+                    phrase = " ".join(current_phrase)
+                    if len(phrase) > 3:
+                        key_phrases.append(phrase)
+                    current_phrase = []
+        if current_phrase:
+            phrase = " ".join(current_phrase)
+            if len(phrase) > 3:
+                key_phrases.append(phrase)
+
+        # Also add the full normalized gold answer
+        key_phrases.append(gold_normalized)
+
+        # Check if context contains either the full answer or key phrases
+        context_combined = " ".join(self._normalize_text(t) for t in context_texts)
+
+        # Full answer match
+        if gold_normalized in context_combined:
+            return True
+
+        # Key phrase matching: require majority of key phrases found
+        if key_phrases:
+            found_count = sum(1 for phrase in key_phrases if phrase in context_combined)
+            # At least half of key phrases (or 2, whichever is smaller) must be found
+            required = min(2, max(1, len(key_phrases) // 2))
+            if found_count >= required:
                 return True
 
         return False
@@ -338,6 +412,7 @@ class RewardCalculator:
         tokens_used: int,
         max_tokens: int,
         answer_method: str = "fuzzy",
+        all_seen_texts: Optional[List[str]] = None,
     ) -> RewardMetrics:
         """
         Calculate full reward for an episode.
@@ -353,6 +428,7 @@ class RewardCalculator:
             tokens_used: Tokens used in context
             max_tokens: Maximum token budget
             answer_method: Method for answer evaluation
+            all_seen_texts: Optional list of all chunk texts seen (for content-based matching)
 
         Returns:
             RewardMetrics with all components
@@ -365,17 +441,41 @@ class RewardCalculator:
             max_tokens=max_tokens,
         )
 
-        # Compute precision/recall for output
+        # Try ID-based matching first
         output_precision, output_recall = self.compute_precision_recall(
             tracker.chunks_in_context, gold_chunks
         )
-        metrics.output_precision = output_precision
-        metrics.output_recall = output_recall
-
-        # Compute trajectory recall (all chunks ever seen)
         _, trajectory_recall = self.compute_precision_recall(
             tracker.chunks_seen, gold_chunks
         )
+
+        # If ID matching fails (web search mode), use content-based matching
+        if trajectory_recall == 0 and gold_answer:
+            gold_norm = self._normalize_text(gold_answer)
+
+            # Check if any seen content contains the gold answer
+            if all_seen_texts:
+                seen_relevant = sum(
+                    1
+                    for text in all_seen_texts
+                    if gold_norm in self._normalize_text(text)
+                )
+                if seen_relevant > 0:
+                    trajectory_recall = 1.0  # Found relevant content
+
+            # Check if context contains gold answer
+            if context_texts:
+                context_relevant = sum(
+                    1
+                    for text in context_texts
+                    if gold_norm in self._normalize_text(text)
+                )
+                if context_relevant > 0 and len(context_texts) > 0:
+                    output_recall = 1.0
+                    output_precision = context_relevant / len(context_texts)
+
+        metrics.output_precision = output_precision
+        metrics.output_recall = output_recall
         metrics.trajectory_recall = trajectory_recall
 
         # F-beta score on output

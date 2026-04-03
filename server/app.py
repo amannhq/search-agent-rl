@@ -1,25 +1,10 @@
-"""
-FastAPI application for the Search RL Environment.
-This module creates an HTTP server that exposes the SearchEnvironment
-over HTTP and WebSocket endpoints, compatible with EnvClient.
+"""Server entrypoint for the search environment."""
 
-Endpoints:
-    - POST /reset: Reset the environment
-    - POST /step: Execute an action
-    - GET /state: Get current environment state
-    - GET /schema: Get action/observation schemas
-    - WS /ws: WebSocket endpoint for persistent sessions
+import argparse
+import os
+from pathlib import Path
 
-Usage:
-    # Development (with auto-reload):
-    uvicorn server.app:app --reload --host 0.0.0.0 --port 8000
-
-    # Production:
-    uvicorn server.app:app --host 0.0.0.0 --port 8000 --workers 4
-
-    # Or run directly:
-    python -m server.app
-"""
+from dotenv import load_dotenv
 
 try:
     from openenv.core.env_server.http_server import create_app
@@ -29,14 +14,14 @@ except Exception as e:  # pragma: no cover
     ) from e
 
 try:
-    from ..models import SearchAction, SearchObservation
+    from ..models import SearchAction, SearchEnvConfig, SearchObservation
     from .environment import (
         SearchEnvironment,
         create_sample_corpus,
         create_sample_tasks,
     )
 except ImportError:
-    from models import SearchAction, SearchObservation
+    from models import SearchAction, SearchEnvConfig, SearchObservation
     from server.environment import (
         SearchEnvironment,
         create_sample_corpus,
@@ -44,38 +29,59 @@ except ImportError:
     )
 
 
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[1] / ".env", override=False)
+
+CONFIG_CASTERS = {
+    "search_backend": str,
+    "serper_api_key": str,
+    "max_steps": int,
+    "max_context_tokens": int,
+    "search_top_k": int,
+}
+CONFIG_ENV_NAMES = {
+    "search_backend": "SEARCH_BACKEND",
+    "serper_api_key": "SERPER_API_KEY",
+    "max_steps": "MAX_STEPS",
+    "max_context_tokens": "MAX_CONTEXT_TOKENS",
+    "search_top_k": "SEARCH_TOP_K",
+}
+
+
+def _build_config_from_env() -> SearchEnvConfig:
+    """Build the environment config from a small set of supported env vars."""
+    overrides = {}
+    for field_name, env_name in CONFIG_ENV_NAMES.items():
+        raw = os.getenv(env_name)
+        if raw is None:
+            continue
+        value = raw.strip()
+        if not value:
+            continue
+        overrides[field_name] = CONFIG_CASTERS[field_name](value)
+    return SearchEnvConfig().model_copy(update=overrides) if overrides else SearchEnvConfig()
+
+
 def create_environment() -> SearchEnvironment:
-    """Factory function to create a SearchEnvironment with sample data."""
-    corpus = create_sample_corpus()
-    tasks = create_sample_tasks()
-    return SearchEnvironment(corpus=corpus, tasks=tasks)
+    """Create one environment instance."""
+    config = _build_config_from_env()
+    return SearchEnvironment(
+        config=config,
+        corpus=create_sample_corpus(config),
+        tasks=create_sample_tasks(),
+    )
 
 
-# Create the app with web interface and README integration
-# Using factory mode for concurrent sessions
 app = create_app(
-    create_environment,  # Factory function for concurrent sessions
+    create_environment,
     SearchAction,
     SearchObservation,
     env_name="search_env",
-    max_concurrent_envs=4,  # Allow multiple concurrent WebSocket sessions
+    max_concurrent_envs=4,
 )
 
 
-def main():
-    """
-    Entry point for direct execution via uv run or python -m.
-
-    This function enables running the server without Docker:
-        uv run --project . server
-        uv run --project . server --port 8001
-        python -m search_env.server.app
-
-    For production deployments, consider using uvicorn directly with
-    multiple workers:
-        uvicorn search_env.server.app:app --workers 4
-    """
-    import argparse
+def main() -> None:
+    """Run the server directly."""
     import uvicorn
 
     parser = argparse.ArgumentParser()

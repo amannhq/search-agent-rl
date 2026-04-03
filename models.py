@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Union
 from openenv.core.env_server.types import Action, Observation
 from pydantic import BaseModel, Field
 
+
 class Chunk(BaseModel):
     """A chunk of text from a document."""
 
@@ -146,6 +147,7 @@ class SearchResult(BaseModel):
     """Result of a search action."""
 
     query: str = Field(..., description="The query that was issued")
+    backend: str = Field(default="sample", description="Retrieval backend used")
     results: List[ChunkSummary] = Field(
         default_factory=list, description="Search results"
     )
@@ -155,6 +157,7 @@ class SearchResult(BaseModel):
 class ReadResult(BaseModel):
     """Result of a read action."""
 
+    backend: str = Field(default="sample", description="Retrieval backend used")
     chunks: List[Chunk] = Field(default_factory=list, description="Full chunk content")
     tokens_added: int = Field(default=0, description="Tokens added to context")
     budget_exceeded: bool = Field(
@@ -202,9 +205,34 @@ class AnswerResult(BaseModel):
         default=False,
         description="Whether a kept chunk directly contains the gold answer",
     )
+    answer_similarity: float = Field(
+        default=0.0, description="Similarity between answer and gold answer"
+    )
+    f_beta_reward: float = Field(
+        default=0.0, description="Weighted F-beta contribution to total reward"
+    )
+    trajectory_reward: float = Field(
+        default=0.0, description="Weighted trajectory contribution to total reward"
+    )
+    answer_reward: float = Field(
+        default=0.0, description="Evidence-backed answer bonus contribution"
+    )
+    turn_penalty: float = Field(
+        default=0.0, description="Turn-count penalty applied to the episode"
+    )
+    prune_penalty: float = Field(
+        default=0.0, description="Excessive-pruning penalty applied to the episode"
+    )
+    pre_penalty_reward: float = Field(
+        default=0.0, description="Reward before penalties are subtracted"
+    )
+    reward_floor: float = Field(
+        default=0.0, description="Lower clamp floor for completed trajectories"
+    )
 
 
 ActionResult = Union[SearchResult, ReadResult, PruneResult, AnswerResult]
+
 
 class SearchObservation(Observation):
     """
@@ -248,6 +276,10 @@ class SearchObservation(Observation):
     chunks_seen_count: int = Field(
         default=0, description="Total unique chunks encountered"
     )
+    search_backend: str = Field(
+        default="sample", description="Retrieval backend active for this episode"
+    )
+
 
 class SearchTask(BaseModel):
     """
@@ -331,6 +363,36 @@ class SearchEnvConfig(BaseModel):
     )
     snippet_length: int = Field(
         default=200, description="Characters in search snippets"
+    )
+    search_backend: str = Field(
+        default="sample",
+        description="Retrieval backend: sample for local BM25, serper for live web search",
+    )
+    serper_api_key: Optional[str] = Field(
+        default=None, description="API key for Serper live web search"
+    )
+    serper_api_url: str = Field(
+        default="https://google.serper.dev/search",
+        description="Serper search endpoint",
+    )
+    serper_gl: str = Field(
+        default="us",
+        description="Serper country code (gl parameter) for live web search",
+    )
+    serper_hl: str = Field(
+        default="en",
+        description="Serper language code (hl parameter) for live web search",
+    )
+    web_request_timeout_s: float = Field(
+        default=10.0, description="Timeout for Serper and page fetch requests"
+    )
+    web_max_read_chars: int = Field(
+        default=2000,
+        description="Maximum extracted page characters stored when reading web results",
+    )
+    web_user_agent: str = Field(
+        default="search-env/0.1 (+https://serper.dev)",
+        description="User-Agent for live web page fetches",
     )
 
     # Deduplication

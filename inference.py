@@ -670,7 +670,7 @@ async def run_episode(
 
     LOG.episode = episode
     LOG.task = obs.question
-    LOG.backend = getattr(obs, "search_backend", "unknown")
+    LOG.backend = "bm25"
     LOG.start(obs.question, LOG.backend, max_steps, obs.context_token_budget)
 
     messages = [

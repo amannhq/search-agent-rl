@@ -190,7 +190,6 @@ class SearchEnvironment(Environment):
             max_steps=self.config.max_steps,
             queries_issued=list(self._tracker.queries),
             chunks_seen_count=len(self._chunks_seen),
-            search_backend=self.corpus.search_backend,
             done=self._done,
             reward=reward,
         )
@@ -225,7 +224,6 @@ class SearchEnvironment(Environment):
         self._seen_texts.clear()
         self._done = False
         self._last_metrics = None
-        self._reset_rubric()
         self._configure_reward_beta(**kwargs)
 
         # Get task
@@ -363,7 +361,6 @@ class SearchEnvironment(Environment):
         # Create result
         search_result = SearchResult(
             query=query,
-            backend=self.corpus.search_backend,
             results=results,
             total_found=len(results),
         )
@@ -408,7 +405,6 @@ class SearchEnvironment(Environment):
         self._chunks_seen.update(chunk_ids)
 
         read_result = ReadResult(
-            backend=self.corpus.search_backend,
             chunks=chunks_added,
             tokens_added=tokens_added,
             budget_exceeded=budget_exceeded,

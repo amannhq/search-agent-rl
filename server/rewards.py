@@ -7,7 +7,6 @@ from difflib import SequenceMatcher
 from dataclasses import dataclass, field
 from typing import Iterable, List, Optional, Set
 
-
 @dataclass
 class RewardMetrics:
     """Metrics computed for reward calculation."""

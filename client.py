@@ -115,7 +115,6 @@ class SearchEnv(EnvClient[SearchAction, SearchObservation, State]):
             max_steps=obs_data.get("max_steps", 20),
             queries_issued=obs_data.get("queries_issued", []),
             chunks_seen_count=obs_data.get("chunks_seen_count", 0),
-            search_backend=obs_data.get("search_backend", "sample"),
             done=payload.get("done", False),
             reward=payload.get("reward", 0.0),
             metadata=obs_data.get("metadata", {}),

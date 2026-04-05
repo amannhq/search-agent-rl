@@ -6,24 +6,27 @@
 
 """Search RL Environment - Multi-hop document retrieval for training search agents."""
 
-from .client import SearchEnv
-from .models import (
-    ActionType,
-    AnswerActionPayload,
-    AnswerResult,
-    Chunk,
-    ChunkSummary,
-    PruneActionPayload,
-    PruneResult,
-    ReadActionPayload,
-    ReadResult,
-    SearchAction,
-    SearchActionPayload,
-    SearchEnvConfig,
-    SearchObservation,
-    SearchResult,
-    SearchTask,
-)
+try:
+    from .client import SearchEnv
+    from .models import (
+        ActionType,
+        AnswerActionPayload,
+        AnswerResult,
+        Chunk,
+        ChunkSummary,
+        PruneActionPayload,
+        PruneResult,
+        ReadActionPayload,
+        ReadResult,
+        SearchAction,
+        SearchActionPayload,
+        SearchEnvConfig,
+        SearchObservation,
+        SearchResult,
+        SearchTask,
+    )
+except ImportError:
+    pass
 
 __all__ = [
     # Client

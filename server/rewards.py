@@ -3,49 +3,36 @@ Reward functions for the Search RL Environment.
 Implements F-beta reward with trajectory tracking.
 """
 
-from difflib import SequenceMatcher
+import re
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 from typing import Iterable, List, Optional, Set
+
 
 @dataclass
 class RewardMetrics:
     """Metrics computed for reward calculation."""
 
-    # Precision and recall
     output_precision: float = 0.0
     output_recall: float = 0.0
     trajectory_recall: float = 0.0
-
-    # F-beta score
     f_beta: float = 0.0
     beta: float = 4.0
-
-    # Answer evaluation
     answer_correct: bool = False
     answer_similarity: float = 0.0
     answer_found_in_context: bool = False
-
-    # Efficiency
     steps_used: int = 0
     max_steps: int = 20
     tokens_used: int = 0
     max_tokens: int = 32768
-
-    # Component rewards
     f_beta_reward: float = 0.0
     trajectory_reward: float = 0.0
     answer_reward: float = 0.0
     efficiency_reward: float = 0.0
-
-    # Penalties
     turn_penalty: float = 0.0
     prune_penalty: float = 0.0
-
-    # Pre/post clamp bookkeeping
     pre_penalty_reward: float = 0.0
     reward_floor: float = 0.0
-
-    # Final reward
     total_reward: float = 0.0
 
 
@@ -58,16 +45,9 @@ class TrajectoryTracker:
     relevant chunks are later pruned.
     """
 
-    # All chunks ever seen during search
     chunks_seen: Set[str] = field(default_factory=set)
-
-    # Chunks currently in context
     chunks_in_context: Set[str] = field(default_factory=set)
-
-    # Search queries issued
     queries: List[str] = field(default_factory=list)
-
-    # Prune history (for penalty calculation)
     consecutive_prunes: int = 0
     total_prunes: int = 0
 
@@ -102,45 +82,52 @@ class RewardCalculator:
     """
     Calculate rewards for the Search RL Environment.
 
-    - Weighted F-beta outcome score
-    - Answer bonus for finding the answer
-    - Trajectory recall process reward
-    - Penalties for degenerate behavior
+    Based on the Context-1 paper's reward formula:
+        R = F_β(precision, recall) + R_answer - penalties
+
+    Components:
+    - F-beta score: Measures retrieval quality (0 to 1)
+    - Answer bonus: +1.0 if context contains the gold answer
+    - Trajectory recall: Optional process reward for exploration
+    - Penalties: Turn count and excessive pruning penalties
+
+    Total reward range: approximately -0.5 to 2.0
     """
 
     def __init__(
         self,
         beta: float = 4.0,
-        f_beta_weight: float = 0.7,
+        f_beta_weight: float = 1.0,
         answer_reward_weight: float = 1.0,
-        trajectory_reward_weight: float = 0.3,
+        trajectory_reward_weight: float = 0.0,
         efficiency_reward_weight: float = 0.0,
-        successful_trajectory_floor: float = 0.01,
-        use_trajectory_reward: bool = True,
+        successful_trajectory_floor: float = 0.0,
+        use_trajectory_reward: bool = False,
         prune_penalty_threshold: int = 3,
         prune_penalty_per_excess: float = 0.1,
         prune_penalty_cap: float = 0.5,
-        turn_penalty_start: int = 64,
-        turn_penalty_end: int = 128,
+        turn_penalty_start: int = 15,
+        turn_penalty_end: int = 20,
         turn_penalty_max: float = 0.5,
     ):
         """
         Initialize reward calculator.
 
         Args:
-            beta: F-beta parameter. >1 favors recall, <1 favors precision
-            f_beta_weight: Weight for the F-beta outcome component
-            answer_reward_weight: Weight for answer bonus
-            trajectory_reward_weight: Weight for trajectory recall component
-            efficiency_reward_weight: Weight for efficiency diagnostics
-            successful_trajectory_floor: Minimum reward for successful completions
-            use_trajectory_reward: Whether to include trajectory recall
-            prune_penalty_threshold: Consecutive prunes before penalty
-            prune_penalty_per_excess: Penalty per excess prune
-            prune_penalty_cap: Maximum prune penalty
+            beta: F-beta parameter. >1 favors recall, <1 favors precision.
+                  Paper uses β=4 initially (recall-heavy), annealing to β=1.
+            f_beta_weight: Weight for the F-beta component (default 1.0 per paper)
+            answer_reward_weight: Bonus if answer found in context (default 1.0)
+            trajectory_reward_weight: Weight for trajectory recall (exploration credit)
+            efficiency_reward_weight: Weight for efficiency (usually 0)
+            successful_trajectory_floor: Minimum reward floor
+            use_trajectory_reward: Whether to include trajectory recall in reward
+            prune_penalty_threshold: Consecutive prunes before penalty starts
+            prune_penalty_per_excess: Penalty per excess prune (0.1 per paper)
+            prune_penalty_cap: Maximum prune penalty (0.5 per paper)
             turn_penalty_start: Turn at which penalty begins
-            turn_penalty_end: Turn at which penalty is maximum
-            turn_penalty_max: Maximum turn penalty
+            turn_penalty_end: Turn at which penalty reaches max
+            turn_penalty_max: Maximum turn penalty (0.5 per paper)
         """
         self.beta = beta
         self.f_beta_weight = f_beta_weight
@@ -270,79 +257,27 @@ class RewardCalculator:
         if not gold_normalized:
             return False
 
-        # Extract key phrases from gold answer (split on common separators)
+        # Extract key phrases from gold answer
         # This handles cases like "Mark Zuckerberg was born in White Plains, New York"
-        # where we want to find both "mark zuckerberg" and "white plains"
-        import re
-
+        # The full normalized answer is used for matching, plus we split on punctuation
+        # to extract sub phrases like "mark zuckerberg" and "white plains new york"
         key_phrases = []
-
-        # Extract proper nouns and key facts (words that aren't stopwords)
-        stopwords = {
-            "a",
-            "an",
-            "the",
-            "was",
-            "were",
-            "is",
-            "are",
-            "in",
-            "on",
-            "at",
-            "for",
-            "to",
-            "of",
-            "and",
-            "or",
-            "which",
-            "that",
-            "who",
-            "whom",
-            "born",
-            "paid",
-            "acquired",
-            "went",
-            "public",
-            "founded",
-            "compared",
-        }
-
-        # Find capitalized phrases or numbers with context
-        words = gold_normalized.split()
-        current_phrase = []
-        for word in words:
-            # Keep numbers, dollar amounts, years, or multi-word names
-            if (
-                word.replace("$", "").replace(",", "").replace(".", "").isdigit()
-                or word not in stopwords
-                or len(word) > 3
-            ):
-                current_phrase.append(word)
-            else:
-                if current_phrase:
-                    phrase = " ".join(current_phrase)
-                    if len(phrase) > 3:
-                        key_phrases.append(phrase)
-                    current_phrase = []
-        if current_phrase:
-            phrase = " ".join(current_phrase)
-            if len(phrase) > 3:
-                key_phrases.append(phrase)
+        sub_phrases = re.split(r"[,;:\-\(\)]", gold_normalized)
+        for sub in sub_phrases:
+            sub = sub.strip()
+            if len(sub) > 3:
+                key_phrases.append(sub)
 
         # Also add the full normalized gold answer
         key_phrases.append(gold_normalized)
-
-        # Check if context contains either the full answer or key phrases
         context_combined = " ".join(self._normalize_text(t) for t in context_texts)
 
-        # Full answer match
         if gold_normalized in context_combined:
             return True
 
         # Key phrase matching: require majority of key phrases found
         if key_phrases:
             found_count = sum(1 for phrase in key_phrases if phrase in context_combined)
-            # At least half of key phrases (or 2, whichever is smaller) must be found
             required = min(2, max(1, len(key_phrases) // 2))
             if found_count >= required:
                 return True
@@ -381,6 +316,9 @@ class RewardCalculator:
         """
         if steps <= self.turn_penalty_start:
             return 0.0
+
+        if self.turn_penalty_end == self.turn_penalty_start:
+            return self.turn_penalty_max
 
         progress = (steps - self.turn_penalty_start) / (
             self.turn_penalty_end - self.turn_penalty_start
@@ -440,7 +378,7 @@ class RewardCalculator:
             max_tokens=max_tokens,
         )
 
-        # Try ID-based matching first
+        # Primary: ID-based matching (matches gold chunk IDs directly)
         output_precision, output_recall = self.compute_precision_recall(
             tracker.chunks_in_context, gold_chunks
         )
@@ -448,7 +386,8 @@ class RewardCalculator:
             tracker.chunks_seen, gold_chunks
         )
 
-        # If ID matching fails (web search mode), use content-based matching
+        # Content-based fallback: if ID matching finds nothing but we have a gold answer,
+        # check if the agent found content containing the answer (handles ID mismatches)
         if trajectory_recall == 0 and gold_answer:
             gold_norm = self._normalize_text(gold_answer)
 
@@ -490,41 +429,34 @@ class RewardCalculator:
             context_texts, gold_answer
         )
 
-        # Efficiency is still tracked for diagnostics, but not used in the
-        # final reward formula.
         efficiency = self.compute_efficiency_reward(
             steps_used, max_steps, tokens_used, max_tokens
         )
         metrics.efficiency_reward = efficiency * self.efficiency_reward_weight
-
-        # Penalties
         metrics.turn_penalty = self.compute_turn_penalty(steps_used)
         metrics.prune_penalty = self.compute_prune_penalty(tracker.consecutive_prunes)
 
-        # Component rewards
         metrics.f_beta_reward = metrics.f_beta * self.f_beta_weight
         metrics.trajectory_reward = (
             trajectory_recall * self.trajectory_reward_weight
             if self.use_trajectory_reward
             else 0.0
         )
+
         metrics.answer_reward = (
             self.answer_reward_weight if metrics.answer_found_in_context else 0.0
         )
 
-        # Total reward: clamp(0.7 * F_beta + 0.3 * r_traj + r_fa - penalties, floor, pre_penalty_reward)
         metrics.pre_penalty_reward = (
             metrics.f_beta_reward + metrics.trajectory_reward + metrics.answer_reward
         )
         metrics.reward_floor = self.successful_trajectory_floor
 
-        total = metrics.pre_penalty_reward
-        total -= metrics.turn_penalty + metrics.prune_penalty
-        metrics.total_reward = min(
-            metrics.pre_penalty_reward,
-            max(metrics.reward_floor, total),
+        total = (
+            metrics.pre_penalty_reward - metrics.turn_penalty - metrics.prune_penalty
         )
 
+        metrics.total_reward = max(metrics.reward_floor, total)
         return metrics
 
 

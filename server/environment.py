@@ -13,6 +13,11 @@ from .retrieval import DocumentCorpus
 from .rewards import BetaScheduler, RewardCalculator, RewardMetrics, TrajectoryTracker
 
 try:
+    from .tasks import get_all_tasks, get_documents, get_task_statistics
+except ImportError:
+    from server.tasks import get_all_tasks, get_documents, get_task_statistics
+
+try:
     from ..models import (
         ActionType,
         AnswerResult,
@@ -353,7 +358,7 @@ class SearchEnvironment(Environment):
         self._tracker.record_search(query, chunk_ids)
         self._chunks_seen.update(chunk_ids)
 
-        # Track snippets for content-based matching (web search mode)
+        # Track snippets for content-based matching fallback in reward calculation
         for r in results:
             if r.snippet:
                 self._seen_texts.append(r.snippet)
@@ -522,55 +527,16 @@ class SearchEnvironment(Environment):
 def create_sample_corpus(
     config: Optional[SearchEnvConfig] = None,
 ) -> DocumentCorpus:
-    """Create a sample corpus for testing."""
+    """
+    Create a sample corpus for testing.
+
+    Documents are loaded from the tasks module for better organization.
+    """
     config_dict = config.model_dump() if config is not None else None
     corpus = DocumentCorpus(config=config_dict)
 
-    # Sample documents about companies and acquisitions
-    documents = [
-        {
-            "doc_id": "doc_instagram",
-            "content": """Instagram is a photo and video sharing social networking service. 
-            It was created by Kevin Systrom and Mike Krieger and launched in October 2010. 
-            Facebook Inc. acquired Instagram for approximately $1 billion in cash and stock 
-            in April 2012. The acquisition was completed on September 6, 2012. 
-            At the time, Instagram had 30 million registered users.""",
-            "metadata": {"title": "Instagram - Company Overview"},
-        },
-        {
-            "doc_id": "doc_facebook",
-            "content": """Facebook was founded by Mark Zuckerberg along with his Harvard 
-            College roommates Eduardo Saverin, Andrew McCollum, Dustin Moskovitz, and 
-            Chris Hughes in February 2004. Zuckerberg was born on May 14, 1984, 
-            in White Plains, New York. He grew up in Dobbs Ferry, New York. 
-            Facebook went public in 2012 with a valuation of $104 billion.""",
-            "metadata": {"title": "Facebook - History"},
-        },
-        {
-            "doc_id": "doc_whatsapp",
-            "content": """WhatsApp was founded in 2009 by Brian Acton and Jan Koum, 
-            both former employees of Yahoo!. Facebook announced it was acquiring 
-            WhatsApp for $19 billion in February 2014. This was Facebook's largest 
-            acquisition. WhatsApp had over 450 million monthly active users at the time.""",
-            "metadata": {"title": "WhatsApp Acquisition"},
-        },
-        {
-            "doc_id": "doc_oculus",
-            "content": """Oculus VR is a virtual reality technology company founded by 
-            Palmer Luckey, Brendan Iribe, and others in 2012. Facebook acquired Oculus 
-            for $2 billion in March 2014. The acquisition included $400 million in cash 
-            and 23.1 million shares of Facebook stock.""",
-            "metadata": {"title": "Oculus VR"},
-        },
-        {
-            "doc_id": "doc_twitter",
-            "content": """Twitter was founded in March 2006 by Jack Dorsey, Noah Glass, 
-            Biz Stone, and Evan Williams. The company is headquartered in San Francisco. 
-            Twitter went public in November 2013 with an initial share price of $26. 
-            Elon Musk acquired Twitter in October 2022 for $44 billion.""",
-            "metadata": {"title": "Twitter History"},
-        },
-    ]
+    # Load documents from tasks module
+    documents = get_documents()
 
     for doc in documents:
         corpus.add_document(
@@ -588,135 +554,16 @@ def create_sample_tasks() -> List[SearchTask]:
     """
     Create sample tasks for testing.
 
+    Tasks are loaded from the tasks module which organizes them by difficulty.
+
     Tasks follow the Context-1 paper style:
     - Obfuscated clues (don't mention entities directly)
     - Short, verifiable answers (exist verbatim in documents)
     - Multi-constraint questions requiring decomposition
-    """
-    tasks = [
-        # Task 1: Single-hop, easy (1 constraint)
-        # Answer should be findable in Instagram Wikipedia article
-        SearchTask(
-            task_id="task_1",
-            question=(
-                "A photo-sharing application was acquired by a major social network "
-                "in April 2012 for approximately one billion dollars. "
-                "In what year was this application originally launched?"
-            ),
-            gold_answer="2010",
-            gold_chunk_ids=["doc_instagram_chunk_0"],
-            difficulty="easy",
-            num_hops=1,
-            domain="tech",
-            clues=[
-                "Photo-sharing app acquired in April 2012 for ~$1 billion",
-                "Need the original launch year",
-            ],
-        ),
-        # Task 2: Single-hop, easy (1 constraint)
-        # Answer should be findable in Facebook/Meta Wikipedia article
-        SearchTask(
-            task_id="task_2",
-            question=(
-                "A social networking company founded at Harvard University later "
-                "acquired both Instagram and WhatsApp. In what year was this "
-                "company itself founded?"
-            ),
-            gold_answer="2004",
-            gold_chunk_ids=["doc_facebook_chunk_0"],
-            difficulty="easy",
-            num_hops=1,
-            domain="tech",
-            clues=[
-                "Social network founded at Harvard",
-                "Acquired Instagram and WhatsApp",
-                "Need the founding year",
-            ],
-        ),
-        # Task 3: Two-hop, medium (2 constraints, comparison)
-        # Requires finding both acquisition amounts
-        SearchTask(
-            task_id="task_3",
-            question=(
-                "A social media giant acquired a photo-sharing app for around "
-                "$1 billion and later acquired a messaging service for a much "
-                "larger sum. How many billions of dollars did the messaging "
-                "service acquisition cost?"
-            ),
-            gold_answer="19",
-            gold_chunk_ids=["doc_whatsapp_chunk_0"],
-            difficulty="medium",
-            num_hops=2,
-            domain="tech",
-            clues=[
-                "Photo app acquired for ~$1 billion (Instagram)",
-                "Messaging service acquired for larger amount (WhatsApp)",
-                "Need the WhatsApp acquisition price in billions",
-            ],
-        ),
-        # Task 4: Two-hop, medium (person + location)
-        # Requires finding who founded Facebook, then their birthplace
-        SearchTask(
-            task_id="task_4",
-            question=(
-                "The founder of a social network that was launched from a Harvard "
-                "dormitory in 2004 was born in a city in New York state. "
-                "What is the name of that city?"
-            ),
-            gold_answer="White Plains",
-            gold_chunk_ids=["doc_facebook_chunk_0"],
-            difficulty="medium",
-            num_hops=2,
-            domain="tech",
-            clues=[
-                "Social network launched from Harvard in 2004",
-                "Founder born in a New York state city",
-                "Need the city name",
-            ],
-        ),
-        # Task 5: Two-hop, medium (acquisition + founder origin)
-        SearchTask(
-            task_id="task_5",
-            question=(
-                "A messaging application that was acquired for $19 billion was "
-                "co-founded by two engineers. One of them was born in Ukraine. "
-                "What is the first name of the Ukrainian-born co-founder?"
-            ),
-            gold_answer="Jan",
-            gold_chunk_ids=["doc_whatsapp_chunk_0"],
-            difficulty="medium",
-            num_hops=2,
-            domain="tech",
-            clues=[
-                "Messaging app acquired for $19 billion (WhatsApp)",
-                "Co-founded by two engineers",
-                "One born in Ukraine",
-                "Need the first name",
-            ],
-        ),
-        # Task 6: Single-hop, easy (recent event)
-        # Twitter/X acquisition
-        SearchTask(
-            task_id="task_6",
-            question=(
-                "A billionaire entrepreneur completed the acquisition of a major "
-                "social media platform in October 2022, taking it private. "
-                "How many billions of dollars was the acquisition price?"
-            ),
-            gold_answer="44",
-            gold_chunk_ids=["doc_twitter_chunk_0"],
-            difficulty="easy",
-            num_hops=1,
-            domain="tech",
-            clues=[
-                "Social media platform acquired October 2022",
-                "Taken private by billionaire",
-                "Need the price in billions",
-            ],
-        ),
-    ]
 
-    return tasks
+    Includes easy, medium, and hard difficulties across multiple domains.
+    """
+    return get_all_tasks()
 
 
 if __name__ == "__main__":
@@ -725,8 +572,14 @@ if __name__ == "__main__":
     corpus = create_sample_corpus()
     tasks = create_sample_tasks()
 
-    print(f"Corpus: {corpus.num_documents} documents, {corpus.num_chunks} chunks")
-    print(f"Tasks: {len(tasks)}")
+    # Print task statistics
+    stats = get_task_statistics()
+    print(f"Corpus: {stats['num_documents']} documents, {corpus.num_chunks} chunks")
+    print(f"Tasks: {stats['total_tasks']} total")
+    print(f"  - Easy: {stats['by_difficulty']['easy']}")
+    print(f"  - Medium: {stats['by_difficulty']['medium']}")
+    print(f"  - Hard: {stats['by_difficulty']['hard']}")
+    print(f"  - Domains: {stats['domains']}")
 
     # Create environment
     env = SearchEnvironment(corpus=corpus, tasks=tasks)
@@ -784,3 +637,11 @@ if __name__ == "__main__":
     print(f"Trajectory recall: {get_result(obs, 'trajectory_recall', 0):.3f}")
     print(f"Output recall: {get_result(obs, 'output_recall', 0):.3f}")
     print(f"Final reward: {get_result(obs, 'final_reward', 0):.3f}")
+
+    # Verify reward is in valid range per Context-1 paper: [-0.5, 2.0]
+    # R = F_β(precision, recall) + R_answer - penalties
+    # F_β: 0-1, R_answer: 0-1, penalties: 0-0.5 for prune, 0-0.5 for turn
+    # So range is: 0 + 0 - 0.5 = -0.5 to 1 + 1 - 0 = 2.0
+    reward = get_result(obs, "final_reward", 0)
+    assert -0.5 <= reward <= 2.0, f"Reward {reward} out of bounds [-0.5, 2.0]!"
+    print(f"\n✓ Reward {reward:.3f} is within valid range [-0.5, 2.0]")

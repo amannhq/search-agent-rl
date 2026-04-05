@@ -1,6 +1,6 @@
 ---
-title: Search Env Environment Server
-emoji: 🎺
+title: Search RL Environment
+emoji: 🔍
 colorFrom: purple
 colorTo: pink
 sdk: docker
@@ -11,245 +11,192 @@ tags:
   - openenv
 ---
 
-# Search Env Environment
+# Search RL Environment
 
-A simple test environment that echoes back messages. Perfect for testing the env APIs as well as demonstrating environment usage patterns.
+A reinforcement learning environment for training agents to perform **multi-hop document retrieval** tasks with explicit context management. Based on the Context-1 paper's F-beta reward curriculum.
+
+## Overview
+
+Agents must:
+1. **Search** - Issue queries to find relevant documents
+2. **Read** - Add document chunks to context (consumes token budget)
+3. **Prune** - Remove irrelevant chunks to manage token budget
+4. **Answer** - Submit final answer based on retrieved evidence
+
+The environment rewards agents for:
+- Finding relevant documents (F-beta score emphasizing recall)
+- Exploring broadly (trajectory recall)
+- Providing correct, evidence-backed answers
+- Efficient use of limited token budget
 
 ## Quick Start
 
-The simplest way to use the Search Env environment is through the `SearchEnv` class:
-
 ```python
-from search_env import SearchAction, SearchEnv
+from client import SearchEnv
+from models import SearchAction
+
+# Create environment from Docker image
+env = SearchEnv.from_docker_image("search_env:latest")
 
 try:
-    # Create environment from Docker image
-    search_envenv = SearchEnv.from_docker_image("search_env-env:latest")
+    # Reset to get a question
+    obs = env.reset()
+    print(f"Question: {obs.question}")
+    print(f"Token budget: {obs.context_token_budget}")
 
-    # Reset
-    result = search_envenv.reset()
-    print(f"Reset: {result.observation.echoed_message}")
+    # Search for relevant documents
+    action = SearchAction.make_search("Facebook acquisition Instagram")
+    obs = env.step(action)
+    results = obs.action_result.get("results", [])
+    print(f"Found {len(results)} results")
 
-    # Send multiple messages
-    messages = ["Hello, World!", "Testing echo", "Final message"]
+    # Read top result into context
+    if results:
+        action = SearchAction.make_read([results[0]["chunk_id"]])
+        obs = env.step(action)
+        print(f"Context now has {obs.context_token_count} tokens")
 
-    for msg in messages:
-        result = search_envenv.step(SearchAction(message=msg))
-        print(f"Sent: '{msg}'")
-        print(f"  → Echoed: '{result.observation.echoed_message}'")
-        print(f"  → Length: {result.observation.message_length}")
-        print(f"  → Reward: {result.reward}")
+    # Submit answer
+    action = SearchAction.make_answer("2010", supporting_chunk_ids=[...])
+    obs = env.step(action)
+    print(f"Reward: {obs.reward}")
+    print(f"Answer correct: {obs.action_result.get('answer_correct')}")
 
 finally:
-    # Always clean up
-    search_envenv.close()
+    env.close()
 ```
 
-That's it! The `SearchEnv.from_docker_image()` method handles:
-- Starting the Docker container
-- Waiting for the server to be ready
-- Connecting to the environment
-- Container cleanup when you call `close()`
+## Action Space
 
-## Building the Docker Image
+| Action | Description | Payload |
+|--------|-------------|---------|
+| `search` | Query the document corpus | `query: str`, `top_k: int` |
+| `read` | Add chunks to context | `chunk_ids: List[str]` |
+| `prune` | Remove chunks from context | `chunk_ids: List[str]` |
+| `answer` | Submit final answer (ends episode) | `answer: str`, `supporting_chunk_ids: List[str]` |
 
-Before using the environment, you need to build the Docker image:
-
-```bash
-# From project root
-docker build -t search_env-env:latest -f server/Dockerfile .
-```
-
-## Deploying to Hugging Face Spaces
-
-You can easily deploy your OpenEnv environment to Hugging Face Spaces using the `openenv push` command:
-
-```bash
-# From the environment directory (where openenv.yaml is located)
-openenv push
-
-# Or specify options
-openenv push --namespace my-org --private
-```
-
-The `openenv push` command will:
-1. Validate that the directory is an OpenEnv environment (checks for `openenv.yaml`)
-2. Prepare a custom build for Hugging Face Docker space (enables web interface)
-3. Upload to Hugging Face (ensuring you're logged in)
-
-### Prerequisites
-
-- Authenticate with Hugging Face: The command will prompt for login if not already authenticated
-
-### Options
-
-- `--directory`, `-d`: Directory containing the OpenEnv environment (defaults to current directory)
-- `--repo-id`, `-r`: Repository ID in format 'username/repo-name' (defaults to 'username/env-name' from openenv.yaml)
-- `--base-image`, `-b`: Base Docker image to use (overrides Dockerfile FROM)
-- `--private`: Deploy the space as private (default: public)
-
-### Examples
-
-```bash
-# Push to your personal namespace (defaults to username/env-name from openenv.yaml)
-openenv push
-
-# Push to a specific repository
-openenv push --repo-id my-org/my-env
-
-# Push with a custom base image
-openenv push --base-image ghcr.io/meta-pytorch/openenv-base:latest
-
-# Push as a private space
-openenv push --private
-
-# Combine options
-openenv push --repo-id my-org/my-env --base-image custom-base:latest --private
-```
-
-After deployment, your space will be available at:
-`https://huggingface.co/spaces/<repo-id>`
-
-The deployed space includes:
-- **Web Interface** at `/web` - Interactive UI for exploring the environment
-- **API Documentation** at `/docs` - Full OpenAPI/Swagger interface
-- **Health Check** at `/health` - Container health monitoring
-- **WebSocket** at `/ws` - Persistent session endpoint for low-latency interactions
-
-## Environment Details
-
-### Action
-**SearchAction**: Contains a single field
-- `message` (str) - The message to echo back
-
-### Observation
-**SearchObservation**: Contains the echo response and metadata
-- `echoed_message` (str) - The message echoed back
-- `message_length` (int) - Length of the message
-- `reward` (float) - Reward based on message length (length × 0.1)
-- `done` (bool) - Always False for echo environment
-- `metadata` (dict) - Additional info like step count
-
-### Reward
-The reward is calculated as: `message_length × 0.1`
-- "Hi" → reward: 0.2
-- "Hello, World!" → reward: 1.3
-- Empty message → reward: 0.0
-
-## Advanced Usage
-
-### Connecting to an Existing Server
-
-If you already have a Search Env environment server running, you can connect directly:
+## Observation Space
 
 ```python
-from search_env import SearchEnv
-
-# Connect to existing server
-search_envenv = SearchEnv(base_url="<ENV_HTTP_URL_HERE>")
-
-# Use as normal
-result = search_envenv.reset()
-result = search_envenv.step(SearchAction(message="Hello!"))
+SearchObservation:
+    question: str                    # The question to answer
+    context_chunks: List[ChunkSummary]  # Chunks currently in context
+    context_token_count: int         # Current tokens used
+    context_token_budget: int        # Maximum tokens allowed (default: 32768)
+    budget_usage_percent: float      # Percentage of budget used
+    budget_warning: Optional[str]    # Warning when near limit
+    action_result: Dict              # Result of last action
+    step_count: int                  # Current step number
+    max_steps: int                   # Maximum steps allowed (default: 20)
+    queries_issued: List[str]        # Search history
+    done: bool                       # Episode finished?
+    reward: float                    # Reward (only non-zero on answer)
 ```
 
-Note: When connecting to an existing server, `search_envenv.close()` will NOT stop the server.
+## Reward Function
 
-### Using the Context Manager
+The reward combines multiple components:
 
-The client supports context manager usage for automatic connection management:
+| Component | Weight | Description |
+|-----------|--------|-------------|
+| **F-beta Score** | 0.7 | Precision/recall of gold chunks in context (β=4 emphasizes recall) |
+| **Trajectory Recall** | 0.3 | Credit for finding gold chunks, even if later pruned |
+| **Answer Bonus** | 1.0 | Bonus if answer is correct AND evidence is in context |
 
-```python
-from search_env import SearchAction, SearchEnv
+Penalties:
+- **Turn penalty**: Gradual penalty for using many steps
+- **Prune penalty**: Penalty for excessive consecutive pruning
 
-# Connect with context manager (auto-connects and closes)
-with SearchEnv(base_url="http://localhost:8000") as env:
-    result = env.reset()
-    print(f"Reset: {result.observation.echoed_message}")
-    # Multiple steps with low latency
-    for msg in ["Hello", "World", "!"]:
-        result = env.step(SearchAction(message=msg))
-        print(f"Echoed: {result.observation.echoed_message}")
-```
+## Tasks
 
-The client uses WebSocket connections for:
-- **Lower latency**: No HTTP connection overhead per request
-- **Persistent session**: Server maintains your environment state
-- **Efficient for episodes**: Better for many sequential steps
+The environment includes multi-hop questions requiring document retrieval:
 
-### Concurrent WebSocket Sessions
+| Difficulty | Description | Example |
+|------------|-------------|---------|
+| **Easy** | Single-hop, one document needed | "When was Instagram launched?" |
+| **Medium** | Two-hop, requires connecting facts | "Where was Facebook's founder born?" |
+| **Hard** | Multi-constraint, requires reasoning | Complex comparison/temporal questions |
 
-The server supports multiple concurrent WebSocket connections. To enable this,
-modify `server/app.py` to use factory mode:
+## Building & Running
 
-```python
-# In server/app.py - use factory mode for concurrent sessions
-app = create_app(
-    SearchEnvironment,  # Pass class, not instance
-    SearchAction,
-    SearchObservation,
-    max_concurrent_envs=4,  # Allow 4 concurrent sessions
-)
-```
-
-Then multiple clients can connect simultaneously:
-
-```python
-from search_env import SearchAction, SearchEnv
-from concurrent.futures import ThreadPoolExecutor
-
-def run_episode(client_id: int):
-    with SearchEnv(base_url="http://localhost:8000") as env:
-        result = env.reset()
-        for i in range(10):
-            result = env.step(SearchAction(message=f"Client {client_id}, step {i}"))
-        return client_id, result.observation.message_length
-
-# Run 4 episodes concurrently
-with ThreadPoolExecutor(max_workers=4) as executor:
-    results = list(executor.map(run_episode, range(4)))
-```
-
-## Development & Testing
-
-### Direct Environment Testing
-
-Test the environment logic directly without starting the HTTP server:
+### Docker
 
 ```bash
-# From the server directory
-python3 server/search_env_environment.py
+# Build the image
+docker build -t search_env:latest .
+
+# Run the server
+docker run -p 8000:8000 search_env:latest
 ```
 
-This verifies that:
-- Environment resets correctly
-- Step executes actions properly
-- State tracking works
-- Rewards are calculated correctly
-
-### Running Locally
-
-Run the server locally for development:
+### Local Development
 
 ```bash
+# Install dependencies
+uv sync
+
+# Run server
 uvicorn server.app:app --reload
+
+# Run inference baseline
+python inference.py
+```
+
+### Validation
+
+```bash
+# Validate OpenEnv spec compliance
+openenv validate
+
+# Run tests
+pytest tests/
+```
+
+## Configuration
+
+Environment behavior can be configured via `SearchEnvConfig`:
+
+```python
+SearchEnvConfig(
+    max_steps=20,              # Maximum actions per episode
+    max_context_tokens=32768,  # Token budget
+    beta=4.0,                  # F-beta parameter (>1 favors recall)
+    f_beta_weight=0.7,         # Weight for F-beta component
+    trajectory_reward_weight=0.3,  # Weight for exploration credit
+    search_top_k=10,           # Default search results
+)
 ```
 
 ## Project Structure
 
 ```
 search_env/
-├── .dockerignore         # Docker build exclusions
-├── __init__.py            # Module exports
-├── README.md              # This file
 ├── openenv.yaml           # OpenEnv manifest
-├── pyproject.toml         # Project metadata and dependencies
-├── uv.lock                # Locked dependencies (generated)
-├── client.py              # SearchEnv client
-├── models.py              # Action and Observation models
-└── server/
-    ├── __init__.py        # Server module exports
-    ├── search_env_environment.py  # Core environment logic
-    ├── app.py             # FastAPI application (HTTP + WebSocket endpoints)
-    └── Dockerfile         # Container image definition
+├── models.py              # Action/Observation Pydantic models
+├── client.py              # SearchEnv client for connecting to server
+├── inference.py           # Baseline agent implementation
+├── Dockerfile             # Container definition
+├── server/
+│   ├── app.py             # FastAPI server
+│   ├── environment.py     # Core RL environment logic
+│   ├── rewards.py         # Reward calculation (F-beta, penalties)
+│   └── retrieval.py       # BM25 search index
+└── tests/
+    └── test_environment.py  # Environment tests
 ```
+
+## API Endpoints
+
+When deployed, the server exposes:
+
+- `POST /reset` - Start new episode
+- `POST /step` - Execute action
+- `GET /health` - Health check
+- `GET /docs` - OpenAPI documentation
+- `WS /ws` - WebSocket for low-latency interaction
+
+## References
+
+- Based on the Context-1 paper's reward curriculum for iterative retrieval
+- Uses F-beta scoring to balance precision and recall
+- Implements trajectory reward for exploration credit

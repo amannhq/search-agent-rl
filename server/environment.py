@@ -638,10 +638,7 @@ if __name__ == "__main__":
     print(f"Output recall: {get_result(obs, 'output_recall', 0):.3f}")
     print(f"Final reward: {get_result(obs, 'final_reward', 0):.3f}")
 
-    # Verify reward is in valid range per Context-1 paper: [-0.5, 2.0]
-    # R = F_β(precision, recall) + R_answer - penalties
-    # F_β: 0-1, R_answer: 0-1, penalties: 0-0.5 for prune, 0-0.5 for turn
-    # So range is: 0 + 0 - 0.5 = -0.5 to 1 + 1 - 0 = 2.0
+    # Verify reward is in valid range: [0.0, 1.0] (clamped per OpenEnv spec)
     reward = get_result(obs, "final_reward", 0)
-    assert -0.5 <= reward <= 2.0, f"Reward {reward} out of bounds [-0.5, 2.0]!"
-    print(f"\n✓ Reward {reward:.3f} is within valid range [-0.5, 2.0]")
+    assert 0.0 <= reward <= 1.0, f"Reward {reward} out of bounds [0.0, 1.0]!"
+    print(f"\n✓ Reward {reward:.3f} is within valid range [0.0, 1.0]")

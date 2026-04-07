@@ -1,9 +1,9 @@
 """
 Inference script for the Search RL Environment.
 
-Required: OPENAI_API_KEY, (LOCAL_IMAGE_NAME or ENV_BASE_URL)
-Optional: MODEL_NAME, OPENAI_BASE_URL, NUM_EPISODES, MAX_STEPS, SEARCH_TOP_K,
-          READ_TOP_K, TEMPERATURE, LOG_FILE, SEARCH_BACKEND, SERPER_API_KEY
+Required: API_BASE_URL, MODEL_NAME, HF_TOKEN, (LOCAL_IMAGE_NAME or ENV_BASE_URL)
+Optional: NUM_EPISODES, MAX_STEPS, SEARCH_TOP_K,
+          READ_TOP_K, TEMPERATURE, LOG_FILE
 """
 
 from __future__ import annotations
@@ -58,11 +58,9 @@ SearchEnv = _load_search_env()
 
 @dataclass
 class Config:
-    openai_base_url: str = os.getenv(
-        "OPENAI_BASE_URL", "https://router.huggingface.co/v1"
-    )
+    openai_base_url: str = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
     model_name: str = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
-    openai_api_key: str = os.getenv("OPENAI_API_KEY", "")
+    openai_api_key: str = os.getenv("HF_TOKEN", "")
     local_image_name: str = os.getenv("LOCAL_IMAGE_NAME", "")
     env_base_url: str = os.getenv("ENV_BASE_URL", "")
     num_episodes: int = int(os.getenv("NUM_EPISODES", "1") or "1")
@@ -180,7 +178,7 @@ class Logger:
     ):
         err = f" | error={clean(error)}" if error else ""
         done_str = " [DONE]" if done else ""
-        print(f"[{step:2d}] {truncate(action, 70)}{done_str}{err}", flush=True)
+        print(f"[STEP] {step} {truncate(action, 70)}{done_str}{err}", flush=True)
         self._write(
             self._record(
                 "step",
@@ -778,8 +776,6 @@ async def create_env():
         "MAX_STEPS",
         "MAX_CONTEXT_TOKENS",
         "SEARCH_TOP_K",
-        "SEARCH_BACKEND",
-        "SERPER_API_KEY",
     ]
     env_vars = {k: v for k in env_keys if (v := os.getenv(k))}
     return await SearchEnv.from_docker_image(CFG.local_image_name, env_vars=env_vars)
@@ -787,7 +783,7 @@ async def create_env():
 
 async def main():
     if not CFG.openai_api_key:
-        raise RuntimeError("OPENAI_API_KEY required")
+        raise RuntimeError("HF_TOKEN required")
 
     env = None
     try:

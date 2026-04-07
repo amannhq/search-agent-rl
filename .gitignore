@@ -29,3 +29,10 @@ htmlcov/
 
 # Local environment secrets
 .env
+
+# Internal docs / notes
+CONTEXT_1_PAPER_SUMMARY.md
+DESIGN.md
+IMPLEMENTATION_PLAN.md
+links.txt
+logs/

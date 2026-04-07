@@ -12,14 +12,13 @@ class TestRewardCalculation:
     """Tests for reward calculation in environment."""
 
     def test_reward_in_valid_range(self, env: SearchEnvironment) -> None:
-        """Rewards should be in a reasonable range."""
+        """Rewards should be in [0.0, 1.0] range."""
         env.reset()
 
         obs = env.step(SearchAction.make_answer("test"))
 
-        # Reward should be bounded (per Context-1 paper: -0.5 to 2.0)
         assert obs.reward is not None
-        assert -1.0 <= float(obs.reward) <= 3.0
+        assert 0.0 <= float(obs.reward) <= 1.0
 
     def test_correct_answer_higher_reward(
         self, corpus: DocumentCorpus, tasks: List

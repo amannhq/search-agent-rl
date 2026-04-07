@@ -456,7 +456,8 @@ class RewardCalculator:
             metrics.pre_penalty_reward - metrics.turn_penalty - metrics.prune_penalty
         )
 
-        metrics.total_reward = max(metrics.reward_floor, total)
+        # Clamp to [0.0, 1.0] as required by OpenEnv spec
+        metrics.total_reward = max(0.0, min(1.0, max(metrics.reward_floor, total)))
         return metrics
 
 

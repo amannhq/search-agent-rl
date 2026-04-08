@@ -15,10 +15,15 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from dotenv import load_dotenv
 from openai import AsyncOpenAI, RateLimitError
+from openai.types.chat import (
+    ChatCompletionMessageParam,
+    ChatCompletionMessageToolCall,
+    ChatCompletionToolParam,
+)
 
 try:
     from .models import SearchAction
@@ -55,7 +60,7 @@ SearchEnv = _load_search_env()
 class Config:
     openai_base_url: str = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
     model_name: str = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
-    openai_api_key: str = os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY") or ""
+    openai_api_key: str = os.getenv("API_KEY") or os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY") or ""
     local_image_name: str = os.getenv("LOCAL_IMAGE_NAME") or ""
     env_base_url: str = os.getenv("ENV_BASE_URL") or ""
     benchmark: str = os.getenv("SEARCH_ENV_BENCHMARK", "search_env")
@@ -69,10 +74,6 @@ class Config:
     soft_budget_threshold: float = 0.75
     hard_budget_threshold: float = 0.95
     prune_target_threshold: float = 0.60
-
-    @property
-    def reasoning_effort(self) -> Optional[str]:
-        return "low" if "gpt-oss" in self.model_name.lower() else None
 
 
 CFG = Config()
@@ -104,7 +105,7 @@ def log_start(task: str, env: str, model: str) -> None:
 
 
 def log_step(
-    step: int, action: str, reward: float, done: bool, error: Optional[str]
+    step: int, action: str, reward: float, done: bool, error: str | None
 ) -> None:
     error_val = error if error else "null"
     done_val = str(done).lower()
@@ -117,7 +118,7 @@ def log_step(
 
 
 def log_end(
-    success: bool, steps: int, score: float, rewards: List[float]
+    success: bool, steps: int, score: float, rewards: list[float]
 ) -> None:
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(
@@ -127,7 +128,7 @@ def log_end(
     )
 
 
-TOOLS = [
+TOOLS: list[ChatCompletionToolParam] = [
     {
         "type": "function",
         "function": {
@@ -232,24 +233,24 @@ class ActionBuilder:
         self.budget_pct = observation.budget_usage_percent / 100.0
 
     def search(
-        self, query: str, top_k: Optional[int] = None
-    ) -> Tuple[SearchAction, str]:
+        self, query: str, top_k: int | None = None
+    ) -> tuple[SearchAction, str]:
         k = top_k if top_k is not None else CFG.search_top_k
         return SearchAction.make_search(query, k), f"search('{truncate(query, 40)}', k={k})"
 
-    def read(self, chunk_ids: List[str]) -> Tuple[SearchAction, str]:
+    def read(self, chunk_ids: list[str]) -> tuple[SearchAction, str]:
         return SearchAction.make_read(chunk_ids), f"read({len(chunk_ids)} chunks)"
 
-    def prune(self, chunk_ids: List[str]) -> Tuple[SearchAction, str]:
+    def prune(self, chunk_ids: list[str]) -> tuple[SearchAction, str]:
         return SearchAction.make_prune(chunk_ids), f"prune({len(chunk_ids)} chunks)"
 
     def answer(
-        self, text: str, support_ids: Optional[List[str]] = None
-    ) -> Tuple[SearchAction, str]:
+        self, text: str, support_ids: list[str] | None = None
+    ) -> tuple[SearchAction, str]:
         ids = support_ids if support_ids else list(self.context_ids)
         return SearchAction.make_answer(text, ids), f"answer('{truncate(text, 30)}')"
 
-    def from_tool_call(self, tool_call) -> Tuple[SearchAction, str, str]:
+    def from_tool_call(self, tool_call) -> tuple[SearchAction, str, str]:
         name = tool_call.function.name
         args = json.loads(tool_call.function.arguments or "{}")
 
@@ -282,7 +283,7 @@ class ActionBuilder:
 
         raise ValueError(f"Unknown tool: {name}")
 
-    def auto(self) -> Tuple[SearchAction, str]:
+    def auto(self) -> tuple[SearchAction, str]:
         if self._should_prune():
             return self._prune_lowest_relevance()
 
@@ -303,7 +304,7 @@ class ActionBuilder:
             return True
         return False
 
-    def _prune_lowest_relevance(self) -> Tuple[SearchAction, str]:
+    def _prune_lowest_relevance(self) -> tuple[SearchAction, str]:
         sorted_chunks = sorted(self.context, key=lambda c: getattr(c, "score", 0))
         tokens_to_free = int(
             self.obs.context_token_count
@@ -329,7 +330,7 @@ class ActionBuilder:
             r.get("chunk_id") not in self.context_ids for r in results
         )
 
-    def _read_top_results(self) -> Tuple[SearchAction, str]:
+    def _read_top_results(self) -> tuple[SearchAction, str]:
         results = self.result.get("results", [])
         ids = [
             r["chunk_id"]
@@ -338,7 +339,7 @@ class ActionBuilder:
         ]
         return self.read(ids) if ids else self._answer_from_context()
 
-    def _answer_from_context(self) -> Tuple[SearchAction, str]:
+    def _answer_from_context(self) -> tuple[SearchAction, str]:
         return self.answer(self._extract_answer())
 
     def _extract_answer(self) -> str:
@@ -376,7 +377,7 @@ class ActionBuilder:
         return f"Based on retrieved evidence: {self.obs.question}"
 
 
-def build_state(obs, step: int, max_steps: int, full_context: Dict[str, str]) -> str:
+def build_state(obs, step: int, max_steps: int, full_context: dict[str, str]) -> str:
     context_items = []
     for chunk in (obs.context_chunks or [])[:3]:
         text = full_context.get(chunk.chunk_id) or getattr(chunk, "snippet", "")
@@ -411,7 +412,7 @@ def build_state(obs, step: int, max_steps: int, full_context: Dict[str, str]) ->
     return f"Question: {obs.question}\n\nState:\n{json.dumps(state, indent=2)}"
 
 
-def _summarize_action(obs) -> Dict[str, Any]:
+def _summarize_action(obs) -> dict[str, Any]:
     action_type = obs.action_type or "none"
     result = obs.action_result or {}
 
@@ -456,7 +457,7 @@ def _summarize_action(obs) -> Dict[str, Any]:
     return {"type": action_type}
 
 
-def build_tool_result(tool_id: str, obs, step: int, max_steps: int) -> Dict:
+def build_tool_result(tool_id: str, obs: Any, step: int, max_steps: int) -> ChatCompletionMessageParam:
     return {
         "role": "tool",
         "tool_call_id": tool_id,
@@ -477,25 +478,22 @@ def build_tool_result(tool_id: str, obs, step: int, max_steps: int) -> Dict:
 
 
 async def get_action(
-    client: AsyncOpenAI, obs, step: int, max_steps: int, messages: List[Dict]
-) -> Tuple[SearchAction, str, Optional[Dict], Optional[str]]:
+    client: AsyncOpenAI,
+    obs: Any,
+    messages: list[ChatCompletionMessageParam],
+) -> tuple[SearchAction, str, ChatCompletionMessageParam | None, str | None]:
     builder = ActionBuilder(obs)
 
     for attempt in range(CFG.max_retries):
         try:
-            request: Dict[str, Any] = {
-                "model": CFG.model_name,
-                "messages": messages,
-                "tools": TOOLS,
-                "tool_choice": "auto",
-                "temperature": min(CFG.temperature, 0.1),
-                "max_tokens": CFG.max_tokens + (attempt * 64),
-                "stream": False,
-            }
-            if CFG.reasoning_effort:
-                request["reasoning_effort"] = CFG.reasoning_effort
-
-            completion = await client.chat.completions.create(**request)
+            completion = await client.chat.completions.create(
+                model=CFG.model_name,
+                messages=messages,
+                tools=TOOLS,
+                tool_choice="auto",
+                temperature=min(CFG.temperature, 0.1),
+                max_tokens=CFG.max_tokens + (attempt * 64),
+            )
             message = completion.choices[0].message
             tool_calls = list(message.tool_calls or [])
 
@@ -508,19 +506,23 @@ async def get_action(
                 raise ValueError("No tool call")
 
             action, action_str, tool_id = builder.from_tool_call(tool_calls[0])
-            assistant_msg = {
+            std_calls: list[ChatCompletionMessageToolCall] = [
+                tc for tc in tool_calls
+                if isinstance(tc, ChatCompletionMessageToolCall)
+            ]
+            assistant_msg: ChatCompletionMessageParam = {
                 "role": "assistant",
                 "content": message.content or "",
                 "tool_calls": [
                     {
                         "id": tc.id,
-                        "type": tc.type,
+                        "type": "function",
                         "function": {
                             "name": tc.function.name,
                             "arguments": tc.function.arguments,
                         },
                     }
-                    for tc in tool_calls
+                    for tc in std_calls
                 ],
             }
             return action, action_str, assistant_msg, tool_id
@@ -540,7 +542,7 @@ async def get_action(
     return action, action_str, None, None
 
 
-def update_context_cache(obs, cache: Dict[str, str]) -> Dict[str, str]:
+def update_context_cache(obs, cache: dict[str, str]) -> dict[str, str]:
     if obs.action_type == "read":
         for chunk in (obs.action_result or {}).get("chunks", []):
             if chunk.get("chunk_id") and chunk.get("content"):
@@ -552,7 +554,7 @@ def update_context_cache(obs, cache: Dict[str, str]) -> Dict[str, str]:
 
 async def run_episode(
     env, client: AsyncOpenAI,
-) -> Tuple[bool, int, float, List[float]]:
+) -> tuple[bool, int, float, list[float]]:
     result = await env.reset()
     obs = result.observation
     max_steps = int(os.getenv("MAX_STEPS", "") or obs.max_steps or 20)
@@ -560,13 +562,13 @@ async def run_episode(
     task_name = clean(obs.question)[:60]
     log_start(task=task_name, env=CFG.benchmark, model=CFG.model_name)
 
-    messages = [
+    messages: list[ChatCompletionMessageParam] = [
         {"role": "system", "content": SYSTEM},
         {"role": "user", "content": build_state(obs, 1, max_steps, {})},
     ]
 
-    full_context: Dict[str, str] = {}
-    rewards: List[float] = []
+    full_context: dict[str, str] = {}
+    rewards: list[float] = []
     total_reward = 0.0
     success = False
     steps = 0
@@ -578,7 +580,7 @@ async def run_episode(
 
             try:
                 action, action_str, assistant_msg, tool_id = await get_action(
-                    client, obs, step, max_steps, messages
+                    client, obs, messages
                 )
             except Exception:
                 builder = ActionBuilder(obs)
@@ -630,9 +632,8 @@ async def run_episode(
                     },
                 ]
 
-    except Exception as e:
-        # Catch-all for unexpected errors within the episode loop
-        print(f"[DEBUG] Episode error: {e}", flush=True)
+    except Exception:
+        pass
 
     # Compute score clamped to [0, 1]
     score = max(0.0, min(1.0, total_reward))
@@ -657,9 +658,6 @@ async def create_env():
 
 
 async def main():
-    if not CFG.openai_api_key:
-        print("[DEBUG] Warning: HF_TOKEN / API key not set, LLM calls will fail", flush=True)
-
     env = None
     try:
         client = AsyncOpenAI(
@@ -667,16 +665,13 @@ async def main():
         )
         env = await create_env()
 
-        for ep in range(1, CFG.num_episodes + 1):
+        for _ in range(CFG.num_episodes):
             try:
                 await run_episode(env, client)
-            except Exception as e:
-                print(f"[DEBUG] Episode {ep} failed: {e}", flush=True)
+            except Exception:
                 log_end(success=False, steps=0, score=0.0, rewards=[])
 
-    except Exception as e:
-        # If env creation or client setup fails, still produce valid output
-        print(f"[DEBUG] Fatal error: {e}", flush=True)
+    except Exception:
         log_start(task="error", env=CFG.benchmark, model=CFG.model_name)
         log_end(success=False, steps=0, score=0.0, rewards=[])
     finally:

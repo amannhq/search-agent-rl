@@ -1,6 +1,7 @@
 """Tests for reward calculation and beta scheduling."""
 
-from typing import List
+from __future__ import annotations
+
 
 from models import SearchAction
 from server.environment import SearchEnvironment
@@ -21,7 +22,7 @@ class TestRewardCalculation:
         assert 0.0 <= float(obs.reward) <= 1.0
 
     def test_correct_answer_higher_reward(
-        self, corpus: DocumentCorpus, tasks: List
+        self, corpus: DocumentCorpus, tasks: list
     ) -> None:
         """Correct answer should yield higher reward than wrong answer."""
         env = SearchEnvironment(corpus=corpus, tasks=tasks)
@@ -49,9 +50,9 @@ class TestRewardCalculation:
 
         assert correct_reward >= wrong_reward
 
-    def test_reward_deterministic(self, corpus: DocumentCorpus, tasks: List) -> None:
+    def test_reward_deterministic(self, corpus: DocumentCorpus, tasks: list) -> None:
         """Same actions should produce same reward."""
-        rewards: List[float] = []
+        rewards: list[float] = []
         for _ in range(3):
             env = SearchEnvironment(corpus=corpus, tasks=tasks)
             env.reset()

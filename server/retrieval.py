@@ -3,10 +3,12 @@ Retrieval system for the Search RL Environment.
 Implements BM25 search, with hooks for future hybrid search.
 """
 
+from __future__ import annotations
+
 import math
 import re
 from collections import defaultdict
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 try:
     from ..models import Chunk, ChunkSummary
@@ -41,20 +43,20 @@ class BM25Index:
         self.epsilon = epsilon
 
         # Document storage
-        self.chunks: Dict[str, Chunk] = {}
-        self.doc_freqs: Dict[str, int] = defaultdict(int)  # term -> doc count
-        self.doc_lens: Dict[str, int] = {}  # chunk_id -> doc length
+        self.chunks: dict[str, Chunk] = {}
+        self.doc_freqs: dict[str, int] = defaultdict(int)  # term -> doc count
+        self.doc_lens: dict[str, int] = {}  # chunk_id -> doc length
         self.avg_doc_len: float = 0.0
         self.corpus_size: int = 0
         self._total_doc_len: int = 0
 
         # Inverted index: term -> {chunk_id: term_freq}
-        self.inverted_index: Dict[str, Dict[str, int]] = defaultdict(dict)
+        self.inverted_index: dict[str, dict[str, int]] = defaultdict(dict)
 
         # Token count cache
-        self._token_counts: Dict[str, int] = {}
+        self._token_counts: dict[str, int] = {}
 
-    def _tokenize(self, text: str) -> List[str]:
+    def _tokenize(self, text: str) -> list[str]:
         """Simple tokenization: lowercase, split on non-alphanumeric."""
         text = text.lower()
         tokens = re.findall(r"\b\w+\b", text)
@@ -82,7 +84,7 @@ class BM25Index:
         self._token_counts[chunk.chunk_id] = chunk.token_count
 
         # Count term frequencies
-        term_freqs: Dict[str, int] = defaultdict(int)
+        term_freqs: dict[str, int] = defaultdict(int)
         for token in tokens:
             term_freqs[token] += 1
 
@@ -96,7 +98,7 @@ class BM25Index:
         self._total_doc_len += doc_len
         self.avg_doc_len = self._total_doc_len / self.corpus_size
 
-    def add_chunks(self, chunks: List[Chunk]) -> None:
+    def add_chunks(self, chunks: list[Chunk]) -> None:
         """Add multiple chunks to the index."""
         for chunk in chunks:
             self.add_chunk(chunk)
@@ -110,7 +112,7 @@ class BM25Index:
         idf = math.log((self.corpus_size - doc_freq + 0.5) / (doc_freq + 0.5) + 1)
         return max(idf, self.epsilon)
 
-    def _score_document(self, chunk_id: str, query_terms: List[str]) -> float:
+    def _score_document(self, chunk_id: str, query_terms: list[str]) -> float:
         """Compute BM25 score for a document given query terms."""
         score = 0.0
         doc_len = self.doc_lens.get(chunk_id, 0)
@@ -137,8 +139,8 @@ class BM25Index:
         self,
         query: str,
         top_k: int = 10,
-        exclude_ids: Optional[Set[str]] = None,
-    ) -> List[Tuple[str, float]]:
+        exclude_ids: set[str] | None = None,
+    ) -> list[tuple[str, float]]:
         """
         Search the index.
 
@@ -157,7 +159,7 @@ class BM25Index:
             return []
 
         # Find candidate documents (those containing at least one query term)
-        candidates: Set[str] = set()
+        candidates: set[str] = set()
         for term in query_terms:
             if term in self.inverted_index:
                 candidates.update(self.inverted_index[term].keys())
@@ -166,7 +168,7 @@ class BM25Index:
         candidates -= exclude_ids
 
         # Score candidates
-        scores: List[Tuple[str, float]] = []
+        scores: list[tuple[str, float]] = []
         for chunk_id in candidates:
             score = self._score_document(chunk_id, query_terms)
             if score > 0:
@@ -177,11 +179,11 @@ class BM25Index:
 
         return scores[:top_k]
 
-    def get_chunk(self, chunk_id: str) -> Optional[Chunk]:
+    def get_chunk(self, chunk_id: str) -> Chunk | None:
         """Get a chunk by ID."""
         return self.chunks.get(chunk_id)
 
-    def get_chunks(self, chunk_ids: List[str]) -> List[Chunk]:
+    def get_chunks(self, chunk_ids: list[str]) -> list[Chunk]:
         """Get multiple chunks by ID."""
         return [self.chunks[cid] for cid in chunk_ids if cid in self.chunks]
 
@@ -191,7 +193,7 @@ class BM25Index:
 
     def create_summary(
         self, chunk_id: str, score: float = 0.0, snippet_length: int = 200
-    ) -> Optional[ChunkSummary]:
+    ) -> ChunkSummary | None:
         """Create a ChunkSummary from a chunk ID."""
         chunk = self.chunks.get(chunk_id)
         if not chunk:
@@ -227,7 +229,7 @@ class DocumentCorpus:
     Wraps the search index and provides higher-level operations.
     """
 
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: dict[str, Any] | None = None):
         """Initialize corpus with optional config."""
         self.config = config or {}
         self.index = BM25Index(
@@ -236,7 +238,7 @@ class DocumentCorpus:
         )
 
         # Track documents (groups of chunks)
-        self.documents: Dict[str, List[str]] = defaultdict(
+        self.documents: dict[str, list[str]] = defaultdict(
             list
         )  # doc_id -> [chunk_ids]
 
@@ -244,10 +246,10 @@ class DocumentCorpus:
         self,
         doc_id: str,
         content: str,
-        metadata: Optional[Dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
         chunk_size: int = 1000,
         chunk_overlap: int = 200,
-    ) -> List[str]:
+    ) -> list[str]:
         """
         Add a document to the corpus, chunking if necessary.
 
@@ -284,7 +286,7 @@ class DocumentCorpus:
         self.index.add_chunk(chunk)
         self.documents[chunk.document_id].append(chunk.chunk_id)
 
-    def _chunk_text(self, text: str, chunk_size: int, overlap: int) -> List[str]:
+    def _chunk_text(self, text: str, chunk_size: int, overlap: int) -> list[str]:
         """Split text into overlapping chunks."""
         if len(text) <= chunk_size:
             return [text]
@@ -323,9 +325,9 @@ class DocumentCorpus:
         self,
         query: str,
         top_k: int = 10,
-        exclude_ids: Optional[Set[str]] = None,
+        exclude_ids: set[str] | None = None,
         snippet_length: int = 200,
-    ) -> List[ChunkSummary]:
+    ) -> list[ChunkSummary]:
         """
         Search the corpus.
 
@@ -348,20 +350,20 @@ class DocumentCorpus:
 
         return summaries
 
-    def get_chunk(self, chunk_id: str) -> Optional[Chunk]:
+    def get_chunk(self, chunk_id: str) -> Chunk | None:
         """Get a chunk by ID."""
         return self.index.get_chunk(chunk_id)
 
-    def get_chunks(self, chunk_ids: List[str]) -> List[Chunk]:
+    def get_chunks(self, chunk_ids: list[str]) -> list[Chunk]:
         """Get multiple chunks."""
-        chunks: List[Chunk] = []
+        chunks: list[Chunk] = []
         for chunk_id in chunk_ids:
             chunk = self.get_chunk(chunk_id)
             if chunk is not None:
                 chunks.append(chunk)
         return chunks
 
-    def get_document_chunks(self, doc_id: str) -> List[Chunk]:
+    def get_document_chunks(self, doc_id: str) -> list[Chunk]:
         """Get all chunks for a document."""
         chunk_ids = self.documents.get(doc_id, [])
         return self.get_chunks(chunk_ids)

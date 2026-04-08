@@ -5,7 +5,9 @@ A reinforcement learning environment for training agents to perform
 multi-hop document retrieval tasks with explicit context management.
 """
 
-from typing import Any, Dict, List, Optional, Set
+from __future__ import annotations
+
+from typing import Any
 from uuid import uuid4
 from openenv.core.env_server.interfaces import Environment
 from openenv.core.env_server.types import State
@@ -57,9 +59,9 @@ class SearchEnvironment(Environment):
 
     def __init__(
         self,
-        config: Optional[SearchEnvConfig] = None,
-        corpus: Optional[DocumentCorpus] = None,
-        tasks: Optional[List[SearchTask]] = None,
+        config: SearchEnvConfig | None = None,
+        corpus: DocumentCorpus | None = None,
+        tasks: list[SearchTask] | None = None,
     ):
         """
         Initialize the Search RL Environment.
@@ -97,22 +99,20 @@ class SearchEnvironment(Environment):
 
         # Episode state
         self._state = State(episode_id=str(uuid4()), step_count=0)
-        self._current_task: Optional[SearchTask] = None
+        self._current_task: SearchTask | None = None
         self._tracker = TrajectoryTracker()
-        self._context_chunks: Dict[str, Chunk] = {}  # chunk_id -> Chunk
+        self._context_chunks: dict[str, Chunk] = {}
         self._context_token_count: int = 0
-        self._chunks_seen: Set[str] = set()  # For deduplication
-        self._seen_texts: List[
-            str
-        ] = []  # Track snippet/content for content-based matching
+        self._chunks_seen: set[str] = set()
+        self._seen_texts: list[str] = []
         self._done: bool = False
-        self._last_metrics: Optional[RewardMetrics] = None
+        self._last_metrics: RewardMetrics | None = None
 
     def set_corpus(self, corpus: DocumentCorpus) -> None:
         """Set the document corpus."""
         self.corpus = corpus
 
-    def set_tasks(self, tasks: List[SearchTask]) -> None:
+    def set_tasks(self, tasks: list[SearchTask]) -> None:
         """Set the task list."""
         self.tasks = tasks
         self._task_index = 0
@@ -121,7 +121,7 @@ class SearchEnvironment(Environment):
         """Add a task to the task list."""
         self.tasks.append(task)
 
-    def _get_next_task(self) -> Optional[SearchTask]:
+    def _get_next_task(self) -> SearchTask | None:
         """Get the next task in sequence (cycles through tasks)."""
         if not self.tasks:
             return None
@@ -135,7 +135,7 @@ class SearchEnvironment(Environment):
             return 0.0
         return self._context_token_count / self.config.max_context_tokens
 
-    def _get_budget_warning(self) -> Optional[str]:
+    def _get_budget_warning(self) -> str | None:
         if self.config.max_context_tokens <= 0:
             return None
         usage = self._budget_usage
@@ -154,8 +154,8 @@ class SearchEnvironment(Environment):
 
     def _create_observation(
         self,
-        action_result: Optional[Dict[str, Any]] = None,
-        action_type: Optional[str] = None,
+        action_result: dict[str, Any] | None = None,
+        action_type: str | None = None,
         reward: float = 0.0,
     ) -> SearchObservation:
         """Create observation from current state."""
@@ -195,9 +195,9 @@ class SearchEnvironment(Environment):
 
     def reset(
         self,
-        seed: Optional[int] = None,
-        episode_id: Optional[str] = None,
-        task: Optional[SearchTask] = None,
+        seed: int | None = None,
+        episode_id: str | None = None,
+        task: SearchTask | None = None,
         **kwargs: Any,
     ) -> SearchObservation:
         """
@@ -244,7 +244,7 @@ class SearchEnvironment(Environment):
     def step(
         self,
         action: SearchAction,
-        timeout_s: Optional[float] = None,
+        timeout_s: float | None = None,
         **kwargs: Any,
     ) -> SearchObservation:
         """
@@ -265,7 +265,7 @@ class SearchEnvironment(Environment):
 
         self._state.step_count += 1
         reward = 0.0
-        action_result: Dict[str, Any] = {}
+        action_result: dict[str, Any] = {}
 
         # Check step limit
         if self._state.step_count >= self.config.max_steps:
@@ -326,7 +326,7 @@ class SearchEnvironment(Environment):
             reward=reward,
         )
 
-    def _handle_search(self, query: str, top_k: int) -> Dict[str, Any]:
+    def _handle_search(self, query: str, top_k: int) -> dict[str, Any]:
         """Handle search action."""
         # Determine chunks to exclude (for deduplication)
         exclude_ids = self._chunks_seen if self.config.deduplicate_searches else None
@@ -357,9 +357,9 @@ class SearchEnvironment(Environment):
             "total_found": len(results),
         }
 
-    def _handle_read(self, chunk_ids: List[str]) -> Dict[str, Any]:
+    def _handle_read(self, chunk_ids: list[str]) -> dict[str, Any]:
         """Handle read action."""
-        chunks_added: List[Chunk] = []
+        chunks_added: list[Chunk] = []
         tokens_added = 0
         budget_exceeded = False
         chunks_truncated = 0
@@ -390,7 +390,7 @@ class SearchEnvironment(Environment):
             tokens_added += chunk.token_count
             chunks_added.append(chunk)
 
-        # Track
+
         self._tracker.record_read([c.chunk_id for c in chunks_added])
         self._chunks_seen.update(chunk_ids)
 
@@ -401,11 +401,11 @@ class SearchEnvironment(Environment):
             "chunks_truncated": chunks_truncated,
         }
 
-    def _handle_prune(self, chunk_ids: List[str]) -> Dict[str, Any]:
+    def _handle_prune(self, chunk_ids: list[str]) -> dict[str, Any]:
         """Handle prune action."""
         chunks_removed = 0
         tokens_freed = 0
-        invalid_ids: List[str] = []
+        invalid_ids: list[str] = []
 
         for chunk_id in chunk_ids:
             if chunk_id in self._context_chunks:
@@ -416,7 +416,7 @@ class SearchEnvironment(Environment):
             else:
                 invalid_ids.append(chunk_id)
 
-        # Track
+
         self._tracker.record_prune(chunk_ids)
 
         return {
@@ -426,8 +426,8 @@ class SearchEnvironment(Environment):
         }
 
     def _handle_answer(
-        self, answer: str, supporting_chunk_ids: List[str]
-    ) -> Dict[str, Any]:
+        self, answer: str, supporting_chunk_ids: list[str]
+    ) -> dict[str, Any]:
         """Handle answer action - ends the episode."""
         self._done = True
 
@@ -476,7 +476,7 @@ class SearchEnvironment(Environment):
         """Get the current environment state."""
         return self._state
 
-    def get_metrics(self) -> Optional[RewardMetrics]:
+    def get_metrics(self) -> RewardMetrics | None:
         """Get the last computed reward metrics."""
         return self._last_metrics
 
@@ -499,7 +499,7 @@ class SearchEnvironment(Environment):
 
 
 def create_sample_corpus(
-    config: Optional[SearchEnvConfig] = None,
+    config: SearchEnvConfig | None = None,
 ) -> DocumentCorpus:
     """
     Create a sample corpus for testing.
@@ -524,7 +524,7 @@ def create_sample_corpus(
     return corpus
 
 
-def create_sample_tasks() -> List[SearchTask]:
+def create_sample_tasks() -> list[SearchTask]:
     """
     Create sample tasks for testing.
 

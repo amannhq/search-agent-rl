@@ -1,5 +1,7 @@
 """Tests for SearchEnvironment reset and step functionality."""
 
+from __future__ import annotations
+
 from models import SearchAction, SearchEnvConfig
 from server.environment import SearchEnvironment
 

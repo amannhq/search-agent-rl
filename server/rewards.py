@@ -3,10 +3,12 @@ Reward functions for the Search RL Environment.
 Implements F-beta reward with trajectory tracking.
 """
 
+from __future__ import annotations
+
 import re
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
-from typing import Iterable, List, Optional, Set
+from collections.abc import Iterable
 
 
 @dataclass
@@ -45,25 +47,25 @@ class TrajectoryTracker:
     relevant chunks are later pruned.
     """
 
-    chunks_seen: Set[str] = field(default_factory=set)
-    chunks_in_context: Set[str] = field(default_factory=set)
-    queries: List[str] = field(default_factory=list)
+    chunks_seen: set[str] = field(default_factory=set)
+    chunks_in_context: set[str] = field(default_factory=set)
+    queries: list[str] = field(default_factory=list)
     consecutive_prunes: int = 0
     total_prunes: int = 0
 
-    def record_search(self, query: str, chunk_ids: List[str]) -> None:
+    def record_search(self, query: str, chunk_ids: list[str]) -> None:
         """Record a search action."""
         self.queries.append(query)
         self.chunks_seen.update(chunk_ids)
         self.consecutive_prunes = 0  # Reset prune streak
 
-    def record_read(self, chunk_ids: List[str]) -> None:
+    def record_read(self, chunk_ids: list[str]) -> None:
         """Record chunks added to context."""
         self.chunks_in_context.update(chunk_ids)
         self.chunks_seen.update(chunk_ids)
         self.consecutive_prunes = 0
 
-    def record_prune(self, chunk_ids: List[str]) -> None:
+    def record_prune(self, chunk_ids: list[str]) -> None:
         """Record chunks removed from context."""
         self.chunks_in_context -= set(chunk_ids)
         self.consecutive_prunes += 1
@@ -149,7 +151,7 @@ class RewardCalculator:
         return " ".join(text.strip().lower().split())
 
     def compute_f_beta(
-        self, precision: float, recall: float, beta: Optional[float] = None
+        self, precision: float, recall: float, beta: float | None = None
     ) -> float:
         """
         Compute F-beta score.
@@ -173,8 +175,8 @@ class RewardCalculator:
 
     def compute_precision_recall(
         self,
-        retrieved_chunks: Set[str],
-        gold_chunks: Set[str],
+        retrieved_chunks: set[str],
+        gold_chunks: set[str],
     ) -> tuple[float, float]:
         """
         Compute precision and recall.
@@ -241,7 +243,7 @@ class RewardCalculator:
 
     def compute_answer_found_in_context(
         self,
-        context_texts: Optional[Iterable[str]],
+        context_texts: Iterable[str] | None,
         gold_answer: str,
     ) -> bool:
         """
@@ -340,16 +342,16 @@ class RewardCalculator:
     def calculate_reward(
         self,
         tracker: TrajectoryTracker,
-        gold_chunks: Set[str],
+        gold_chunks: set[str],
         gold_answer: str,
         predicted_answer: str,
-        context_texts: Optional[List[str]],
+        context_texts: list[str] | None,
         steps_used: int,
         max_steps: int,
         tokens_used: int,
         max_tokens: int,
         answer_method: str = "fuzzy",
-        all_seen_texts: Optional[List[str]] = None,
+        all_seen_texts: list[str] | None = None,
     ) -> RewardMetrics:
         """
         Calculate full reward for an episode.

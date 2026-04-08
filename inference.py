@@ -1,9 +1,8 @@
 """
 Inference script for the Search RL Environment.
 
-Required: API_BASE_URL, MODEL_NAME, HF_TOKEN, (LOCAL_IMAGE_NAME or ENV_BASE_URL)
-Optional: NUM_EPISODES, MAX_STEPS, SEARCH_TOP_K,
-          READ_TOP_K, TEMPERATURE, LOG_FILE
+Submission system injects: API_BASE_URL, API_KEY, MODEL_NAME
+Environment connection: LOCAL_IMAGE_NAME or ENV_BASE_URL
 """
 
 from __future__ import annotations
@@ -36,11 +35,9 @@ load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env", override=False
 def _load_search_env():
     try:
         from . import SearchEnv
-
         return SearchEnv
     except ImportError:
         import importlib.util
-
         root = Path(__file__).resolve().parent
         spec = importlib.util.spec_from_file_location(
             "search_env", root / "__init__.py", submodule_search_locations=[str(root)]
@@ -58,11 +55,12 @@ SearchEnv = _load_search_env()
 
 @dataclass
 class Config:
-    openai_base_url: str = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
-    model_name: str = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
-    openai_api_key: str = os.getenv("API_KEY") or os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY") or ""
-    local_image_name: str = os.getenv("LOCAL_IMAGE_NAME") or ""
-    env_base_url: str = os.getenv("ENV_BASE_URL") or ""
+    # The submission injects API_BASE_URL and API_KEY. We read them directly.
+    openai_base_url: str = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
+    openai_api_key: str = os.getenv("API_KEY", "") or os.getenv("HF_TOKEN", "")
+    model_name: str = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
+    local_image_name: str = os.getenv("LOCAL_IMAGE_NAME", "")
+    env_base_url: str = os.getenv("ENV_BASE_URL", "")
     benchmark: str = os.getenv("SEARCH_ENV_BENCHMARK", "search_env")
     num_episodes: int = int(os.getenv("NUM_EPISODES", "1") or "1")
     search_top_k: int = int(os.getenv("SEARCH_TOP_K", "5"))
@@ -100,33 +98,33 @@ def truncate(text: str, limit: int = 200) -> str:
     return text if len(text) <= limit else text[: limit - 3] + "..."
 
 
+# ---------------------------------------------------------------------------
+# Mandatory stdout format for submission
+# ---------------------------------------------------------------------------
+
 def log_start(task: str, env: str, model: str) -> None:
     print(f"[START] task={task} env={env} model={model}", flush=True)
 
 
-def log_step(
-    step: int, action: str, reward: float, done: bool, error: str | None
-) -> None:
-    error_val = error if error else "null"
-    done_val = str(done).lower()
-    action_clean = clean(action)[:120]
+def log_step(step: int, action: str, reward: float, done: bool, error: str | None) -> None:
     print(
-        f"[STEP] step={step} action={action_clean} "
-        f"reward={reward:.2f} done={done_val} error={error_val}",
+        f"[STEP] step={step} action={clean(action)[:120]} "
+        f"reward={reward:.2f} done={str(done).lower()} error={error or 'null'}",
         flush=True,
     )
 
 
-def log_end(
-    success: bool, steps: int, score: float, rewards: list[float]
-) -> None:
-    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+def log_end(success: bool, steps: int, score: float, rewards: list[float]) -> None:
     print(
         f"[END] success={str(success).lower()} steps={steps} "
-        f"score={score:.3f} rewards={rewards_str}",
+        f"score={score:.3f} rewards={','.join(f'{r:.2f}' for r in rewards)}",
         flush=True,
     )
 
+
+# ---------------------------------------------------------------------------
+# OpenAI tool definitions
+# ---------------------------------------------------------------------------
 
 TOOLS: list[ChatCompletionToolParam] = [
     {
@@ -221,20 +219,19 @@ Budget thresholds:
 Default top_k: {CFG.search_top_k}"""
 
 
-class ActionBuilder:
-    def __init__(self, observation):
-        self.obs = observation
-        self.result = observation.action_result or {}
-        self.context = observation.context_chunks or []
-        self.context_ids = {c.chunk_id for c in self.context}
-        self.issued_queries = {
-            clean(q).lower() for q in (observation.queries_issued or [])
-        }
-        self.budget_pct = observation.budget_usage_percent / 100.0
+# ---------------------------------------------------------------------------
+# ActionBuilder: converts LLM tool calls to env actions, with auto-fallback
+# ---------------------------------------------------------------------------
 
-    def search(
-        self, query: str, top_k: int | None = None
-    ) -> tuple[SearchAction, str]:
+class ActionBuilder:
+    def __init__(self, observation: Any) -> None:
+        self.obs = observation
+        self.result: dict[str, Any] = observation.action_result or {}
+        self.context = observation.context_chunks or []
+        self.context_ids: set[str] = {c.chunk_id for c in self.context}
+        self.budget_pct: float = observation.budget_usage_percent / 100.0
+
+    def search(self, query: str, top_k: int | None = None) -> tuple[SearchAction, str]:
         k = top_k if top_k is not None else CFG.search_top_k
         return SearchAction.make_search(query, k), f"search('{truncate(query, 40)}', k={k})"
 
@@ -244,20 +241,17 @@ class ActionBuilder:
     def prune(self, chunk_ids: list[str]) -> tuple[SearchAction, str]:
         return SearchAction.make_prune(chunk_ids), f"prune({len(chunk_ids)} chunks)"
 
-    def answer(
-        self, text: str, support_ids: list[str] | None = None
-    ) -> tuple[SearchAction, str]:
+    def answer(self, text: str, support_ids: list[str] | None = None) -> tuple[SearchAction, str]:
         ids = support_ids if support_ids else list(self.context_ids)
         return SearchAction.make_answer(text, ids), f"answer('{truncate(text, 30)}')"
 
-    def from_tool_call(self, tool_call) -> tuple[SearchAction, str, str]:
+    def from_tool_call(self, tool_call: Any) -> tuple[SearchAction, str, str]:
         name = tool_call.function.name
         args = json.loads(tool_call.function.arguments or "{}")
 
         if name == "search":
             query = clean(args.get("query", "")) or self.obs.question
-            top_k = args.get("top_k")
-            action, desc = self.search(query, top_k)
+            action, desc = self.search(query, args.get("top_k"))
             return action, desc, tool_call.id
 
         if name == "read":
@@ -276,205 +270,164 @@ class ActionBuilder:
             text = clean(args.get("answer", ""))
             if not text:
                 raise ValueError("answer requires text")
-            support = [
-                s for s in args.get("supporting_chunk_ids", []) if s in self.context_ids
-            ]
-            return *self.answer(text, support if support else None), tool_call.id
+            support = [s for s in args.get("supporting_chunk_ids", []) if s in self.context_ids]
+            return *self.answer(text, support or None), tool_call.id
 
         raise ValueError(f"Unknown tool: {name}")
 
     def auto(self) -> tuple[SearchAction, str]:
+        """Heuristic fallback when LLM is unavailable."""
         if self._should_prune():
-            return self._prune_lowest_relevance()
-
+            return self._prune_lowest()
         if self._has_unread_results():
-            return self._read_top_results()
-
+            return self._read_top()
         if self.context:
-            return self._answer_from_context()
-
+            return self.answer(self._extract_answer())
         return self.search(self.obs.question)
 
     def _should_prune(self) -> bool:
         if len(self.context) < 2:
             return False
-        if self.budget_pct >= CFG.hard_budget_threshold:
-            return True
-        if self.budget_pct >= CFG.soft_budget_threshold and len(self.context) > 3:
-            return True
-        return False
-
-    def _prune_lowest_relevance(self) -> tuple[SearchAction, str]:
-        sorted_chunks = sorted(self.context, key=lambda c: getattr(c, "score", 0))
-        tokens_to_free = int(
-            self.obs.context_token_count
-            * (1 - CFG.prune_target_threshold / self.budget_pct)
+        return (
+            self.budget_pct >= CFG.hard_budget_threshold
+            or (self.budget_pct >= CFG.soft_budget_threshold and len(self.context) > 3)
         )
 
-        chunks_to_prune = []
-        tokens_freed = 0
+    def _prune_lowest(self) -> tuple[SearchAction, str]:
+        sorted_chunks = sorted(self.context, key=lambda c: getattr(c, "score", 0))
+        target = int(self.obs.context_token_count * (1 - CFG.prune_target_threshold / self.budget_pct))
+        to_prune, freed = [], 0
         for chunk in sorted_chunks:
-            if tokens_freed >= tokens_to_free:
+            if freed >= target:
                 break
-            chunks_to_prune.append(chunk.chunk_id)
-            tokens_freed += chunk.token_count
-
-        if not chunks_to_prune:
-            chunks_to_prune = [sorted_chunks[0].chunk_id]
-
-        return self.prune(chunks_to_prune)
+            to_prune.append(chunk.chunk_id)
+            freed += chunk.token_count
+        if not to_prune:
+            to_prune = [sorted_chunks[0].chunk_id]
+        return self.prune(to_prune)
 
     def _has_unread_results(self) -> bool:
         results = self.result.get("results", [])
-        return bool(results) and any(
-            r.get("chunk_id") not in self.context_ids for r in results
-        )
+        return bool(results) and any(r.get("chunk_id") not in self.context_ids for r in results)
 
-    def _read_top_results(self) -> tuple[SearchAction, str]:
+    def _read_top(self) -> tuple[SearchAction, str]:
         results = self.result.get("results", [])
         ids = [
             r["chunk_id"]
             for r in results[: CFG.read_top_k]
             if r.get("chunk_id") and r["chunk_id"] not in self.context_ids
         ]
-        return self.read(ids) if ids else self._answer_from_context()
-
-    def _answer_from_context(self) -> tuple[SearchAction, str]:
-        return self.answer(self._extract_answer())
+        return self.read(ids) if ids else self.answer(self._extract_answer())
 
     def _extract_answer(self) -> str:
-        question_words = {
-            w for w in _RE_WORD.findall(self.obs.question.lower())
-            if w not in STOPWORDS
-        }
-
-        texts = []
+        q_words = {w for w in _RE_WORD.findall(self.obs.question.lower()) if w not in STOPWORDS}
+        texts: list[str] = []
         for chunk in self.result.get("chunks", []):
             texts.append(clean(chunk.get("content", "")))
         for chunk in self.context:
             texts.append(clean(getattr(chunk, "snippet", "")))
 
-        scored_sentences = []
+        scored: list[tuple[int, str]] = []
         for text in texts:
-            for sentence in _RE_SENTENCE_SPLIT.split(text):
-                sentence = clean(sentence)
-                if not sentence:
+            for sent in _RE_SENTENCE_SPLIT.split(text):
+                sent = clean(sent)
+                if not sent:
                     continue
-                words = set(_RE_WORD.findall(sentence.lower()))
-                score = len(words & question_words)
-                if _RE_DIGIT.search(sentence):
-                    score += 1
-                if score > 0:
-                    scored_sentences.append((score, sentence))
+                words = set(_RE_WORD.findall(sent.lower()))
+                sc = len(words & q_words) + (1 if _RE_DIGIT.search(sent) else 0)
+                if sc > 0:
+                    scored.append((sc, sent))
 
-        if scored_sentences:
-            scored_sentences.sort(key=lambda x: (-x[0], len(x[1])))
-            return " ".join(s for _, s in scored_sentences[:3])
-
-        if texts:
-            return texts[0]
-
-        return f"Based on retrieved evidence: {self.obs.question}"
+        if scored:
+            scored.sort(key=lambda x: (-x[0], len(x[1])))
+            return " ".join(s for _, s in scored[:3])
+        return texts[0] if texts else f"Based on retrieved evidence: {self.obs.question}"
 
 
-def build_state(obs, step: int, max_steps: int, full_context: dict[str, str]) -> str:
+# ---------------------------------------------------------------------------
+# LLM message helpers
+# ---------------------------------------------------------------------------
+
+def build_state(obs: Any, step: int, max_steps: int, full_context: dict[str, str]) -> str:
     context_items = []
     for chunk in (obs.context_chunks or [])[:3]:
         text = full_context.get(chunk.chunk_id) or getattr(chunk, "snippet", "")
-        context_items.append(
-            {
-                "id": chunk.chunk_id,
-                "title": truncate(chunk.title, 40),
-                "tokens": chunk.token_count,
-                "text": truncate(text, CFG.char_limit),
-            }
-        )
+        context_items.append({
+            "id": chunk.chunk_id,
+            "title": truncate(chunk.title, 40),
+            "tokens": chunk.token_count,
+            "text": truncate(text, CFG.char_limit),
+        })
 
-    budget_pct = obs.budget_usage_percent
-    budget_status = "ok"
-    if budget_pct >= CFG.hard_budget_threshold * 100:
-        budget_status = "CRITICAL - must prune or answer"
-    elif budget_pct >= CFG.soft_budget_threshold * 100:
-        budget_status = "high - consider pruning"
+    pct = obs.budget_usage_percent
+    if pct >= CFG.hard_budget_threshold * 100:
+        status = "CRITICAL - must prune or answer"
+    elif pct >= CFG.soft_budget_threshold * 100:
+        status = "high - consider pruning"
+    else:
+        status = "ok"
 
     state = {
         "step": step,
         "remaining": max_steps - step,
-        "budget": {
-            "used": obs.context_token_count,
-            "limit": obs.context_token_budget,
-            "percent": round(budget_pct, 1),
-            "status": budget_status,
-        },
+        "budget": {"used": obs.context_token_count, "limit": obs.context_token_budget, "percent": round(pct, 1), "status": status},
         "context": context_items,
         "last_action": _summarize_action(obs),
     }
     return f"Question: {obs.question}\n\nState:\n{json.dumps(state, indent=2)}"
 
 
-def _summarize_action(obs) -> dict[str, Any]:
-    action_type = obs.action_type or "none"
-    result = obs.action_result or {}
-
-    if action_type == "search":
-        return {
-            "type": "search",
-            "query": result.get("query"),
-            "results": [
-                {
-                    "id": r.get("chunk_id"),
-                    "title": truncate(r.get("title", ""), 40),
-                    "snippet": truncate(r.get("snippet", ""), 100),
-                }
-                for r in result.get("results", [])[:4]
-            ],
-        }
-
-    if action_type == "read":
-        return {
-            "type": "read",
-            "tokens_added": result.get("tokens_added"),
-            "chunks": [
-                {"id": c.get("chunk_id"), "text": truncate(c.get("content", ""), 150)}
-                for c in result.get("chunks", [])[:2]
-            ],
-        }
-
-    if action_type == "prune":
-        return {
-            "type": "prune",
-            "removed": result.get("chunks_removed"),
-            "freed": result.get("tokens_freed"),
-        }
-
-    if action_type == "answer":
-        return {
-            "type": "answer",
-            "reward": result.get("final_reward"),
-            "correct": result.get("answer_correct"),
-        }
-
-    return {"type": action_type}
+def _summarize_action(obs: Any) -> dict[str, Any]:
+    at = obs.action_type or "none"
+    r = obs.action_result or {}
+    if at == "search":
+        return {"type": "search", "query": r.get("query"), "results": [
+            {"id": x.get("chunk_id"), "title": truncate(x.get("title", ""), 40), "snippet": truncate(x.get("snippet", ""), 100)}
+            for x in r.get("results", [])[:4]
+        ]}
+    if at == "read":
+        return {"type": "read", "tokens_added": r.get("tokens_added"), "chunks": [
+            {"id": c.get("chunk_id"), "text": truncate(c.get("content", ""), 150)} for c in r.get("chunks", [])[:2]
+        ]}
+    if at == "prune":
+        return {"type": "prune", "removed": r.get("chunks_removed"), "freed": r.get("tokens_freed")}
+    if at == "answer":
+        return {"type": "answer", "reward": r.get("final_reward"), "correct": r.get("answer_correct")}
+    return {"type": at}
 
 
 def build_tool_result(tool_id: str, obs: Any, step: int, max_steps: int) -> ChatCompletionMessageParam:
     return {
         "role": "tool",
         "tool_call_id": tool_id,
-        "content": json.dumps(
-            {
-                "step": step + 1,
-                "remaining": max_steps - step - 1,
-                "done": obs.done,
-                "reward": obs.reward or 0.0,
-                "budget": {
-                    "used": obs.context_token_count,
-                    "percent": round(obs.budget_usage_percent, 1),
-                },
-                "last_action": _summarize_action(obs),
-            }
-        ),
+        "content": json.dumps({
+            "step": step + 1, "remaining": max_steps - step - 1, "done": obs.done,
+            "reward": obs.reward or 0.0,
+            "budget": {"used": obs.context_token_count, "percent": round(obs.budget_usage_percent, 1)},
+            "last_action": _summarize_action(obs),
+        }),
     }
+
+
+# ---------------------------------------------------------------------------
+# LLM call with retries. Always attempts the call (so the proxy sees it).
+# Falls back to heuristic only after all retries are exhausted.
+# ---------------------------------------------------------------------------
+
+async def call_llm(
+    client: AsyncOpenAI,
+    messages: list[ChatCompletionMessageParam],
+    attempt_extra_tokens: int = 0,
+) -> Any:
+    """Make a single LLM call. Raises on failure."""
+    return await client.chat.completions.create(
+        model=CFG.model_name,
+        messages=messages,
+        tools=TOOLS,
+        tool_choice="auto",
+        temperature=min(CFG.temperature, 0.1),
+        max_tokens=CFG.max_tokens + attempt_extra_tokens,
+    )
 
 
 async def get_action(
@@ -486,51 +439,31 @@ async def get_action(
 
     for attempt in range(CFG.max_retries):
         try:
-            completion = await client.chat.completions.create(
-                model=CFG.model_name,
-                messages=messages,
-                tools=TOOLS,
-                tool_choice="auto",
-                temperature=min(CFG.temperature, 0.1),
-                max_tokens=CFG.max_tokens + (attempt * 64),
-            )
+            completion = await call_llm(client, messages, attempt_extra_tokens=attempt * 64)
             message = completion.choices[0].message
             tool_calls = list(message.tool_calls or [])
 
             if not tool_calls:
-                if (
-                    completion.choices[0].finish_reason == "length"
-                    and attempt < CFG.max_retries - 1
-                ):
+                if completion.choices[0].finish_reason == "length" and attempt < CFG.max_retries - 1:
                     continue
-                raise ValueError("No tool call")
+                raise ValueError("No tool call returned")
 
             action, action_str, tool_id = builder.from_tool_call(tool_calls[0])
-            std_calls: list[ChatCompletionMessageToolCall] = [
-                tc for tc in tool_calls
-                if isinstance(tc, ChatCompletionMessageToolCall)
-            ]
+
+            std_calls = [tc for tc in tool_calls if isinstance(tc, ChatCompletionMessageToolCall)]
             assistant_msg: ChatCompletionMessageParam = {
                 "role": "assistant",
                 "content": message.content or "",
                 "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments,
-                        },
-                    }
+                    {"id": tc.id, "type": "function", "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
                     for tc in std_calls
                 ],
             }
             return action, action_str, assistant_msg, tool_id
 
         except RateLimitError:
-            delay = min(2.0 * (attempt + 1), 8.0)
             if attempt < CFG.max_retries - 1:
-                await asyncio.sleep(delay)
+                await asyncio.sleep(min(2.0 * (attempt + 1), 8.0))
             continue
 
         except Exception:
@@ -538,29 +471,30 @@ async def get_action(
                 continue
             break
 
+    # All retries exhausted — use heuristic fallback
     action, action_str = builder.auto()
     return action, action_str, None, None
 
 
-def update_context_cache(obs, cache: dict[str, str]) -> dict[str, str]:
+def update_context_cache(obs: Any, cache: dict[str, str]) -> dict[str, str]:
     if obs.action_type == "read":
         for chunk in (obs.action_result or {}).get("chunks", []):
             if chunk.get("chunk_id") and chunk.get("content"):
                 cache[chunk["chunk_id"]] = chunk["content"]
-
     current_ids = {c.chunk_id for c in (obs.context_chunks or [])}
     return {k: v for k, v in cache.items() if k in current_ids}
 
 
-async def run_episode(
-    env, client: AsyncOpenAI,
-) -> tuple[bool, int, float, list[float]]:
+# ---------------------------------------------------------------------------
+# Episode runner
+# ---------------------------------------------------------------------------
+
+async def run_episode(env: Any, client: AsyncOpenAI) -> tuple[bool, int, float, list[float]]:
     result = await env.reset()
     obs = result.observation
     max_steps = int(os.getenv("MAX_STEPS", "") or obs.max_steps or 20)
 
-    task_name = clean(obs.question)[:60]
-    log_start(task=task_name, env=CFG.benchmark, model=CFG.model_name)
+    log_start(task=clean(obs.question)[:60], env=CFG.benchmark, model=CFG.model_name)
 
     messages: list[ChatCompletionMessageParam] = [
         {"role": "system", "content": SYSTEM},
@@ -579,9 +513,7 @@ async def run_episode(
                 break
 
             try:
-                action, action_str, assistant_msg, tool_id = await get_action(
-                    client, obs, messages
-                )
+                action, action_str, assistant_msg, tool_id = await get_action(client, obs, messages)
             except Exception:
                 builder = ActionBuilder(obs)
                 action, action_str = builder.auto()
@@ -590,7 +522,6 @@ async def run_episode(
             try:
                 result = await env.step(action)
             except Exception as e:
-                # Env step failed — log and break
                 log_step(step=step, action=action_str, reward=0.0, done=True, error=str(e))
                 rewards.append(0.0)
                 steps = step
@@ -598,26 +529,17 @@ async def run_episode(
 
             obs = result.observation
             full_context = update_context_cache(obs, full_context)
-
             steps = step
             step_reward = result.reward or 0.0
             rewards.append(step_reward)
-            error = (obs.action_result or {}).get("error")
 
-            log_step(
-                step=step,
-                action=action_str,
-                reward=step_reward,
-                done=result.done,
-                error=error,
-            )
+            log_step(step=step, action=action_str, reward=step_reward, done=result.done,
+                     error=(obs.action_result or {}).get("error"))
 
             if result.done:
-                answer_result = obs.action_result or {}
-                total_reward = float(answer_result.get("final_reward", 0) or 0)
-                success = bool(
-                    answer_result.get("answer_found_in_context") or total_reward > 0
-                )
+                ar = obs.action_result or {}
+                total_reward = float(ar.get("final_reward", 0) or 0)
+                success = bool(ar.get("answer_found_in_context") or total_reward > 0)
                 break
 
             if assistant_msg and tool_id:
@@ -626,51 +548,45 @@ async def run_episode(
             else:
                 messages = [
                     {"role": "system", "content": SYSTEM},
-                    {
-                        "role": "user",
-                        "content": build_state(obs, step + 1, max_steps, full_context),
-                    },
+                    {"role": "user", "content": build_state(obs, step + 1, max_steps, full_context)},
                 ]
-
     except Exception:
         pass
 
-    # Compute score clamped to [0, 1]
     score = max(0.0, min(1.0, total_reward))
-
     log_end(success=success, steps=steps, score=score, rewards=rewards)
     return success, steps, score, rewards
 
 
-async def create_env():
-    """Create environment, preferring LOCAL_IMAGE_NAME over ENV_BASE_URL."""
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+async def create_env() -> Any:
     if CFG.local_image_name:
         env_keys = ["MAX_STEPS", "MAX_CONTEXT_TOKENS", "SEARCH_TOP_K"]
         env_vars = {k: v for k in env_keys if (v := os.getenv(k))}
         return await SearchEnv.from_docker_image(CFG.local_image_name, env_vars=env_vars)
-
     if CFG.env_base_url:
         env = SearchEnv(base_url=CFG.env_base_url)
         await env.connect()
         return env
-
     raise RuntimeError("Set LOCAL_IMAGE_NAME or ENV_BASE_URL")
 
 
-async def main():
+async def main() -> None:
     env = None
     try:
         client = AsyncOpenAI(
-            base_url=CFG.openai_base_url, api_key=CFG.openai_api_key or "no-key"
+            base_url=CFG.openai_base_url,
+            api_key=CFG.openai_api_key or "no-key",
         )
         env = await create_env()
-
         for _ in range(CFG.num_episodes):
             try:
                 await run_episode(env, client)
             except Exception:
                 log_end(success=False, steps=0, score=0.0, rewards=[])
-
     except Exception:
         log_start(task="error", env=CFG.benchmark, model=CFG.model_name)
         log_end(success=False, steps=0, score=0.0, rewards=[])
@@ -682,7 +598,7 @@ async def main():
                 pass
 
 
-def cli():
+def cli() -> None:
     asyncio.run(main())
 
 

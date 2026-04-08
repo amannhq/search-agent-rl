@@ -14,20 +14,15 @@ import os
 import re
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from dotenv import load_dotenv
 from openai import AsyncOpenAI, RateLimitError
 
 try:
-    from .log_utils import append_log_record as sync_log
-    from .log_utils import append_log_record_async as async_log
     from .models import SearchAction
 except ImportError:
-    from log_utils import append_log_record as sync_log
-    from log_utils import append_log_record_async as async_log
     from models import SearchAction
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env", override=False)
@@ -58,18 +53,18 @@ SearchEnv = _load_search_env()
 
 @dataclass
 class Config:
-    openai_base_url: str = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-    model_name: str = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
-    openai_api_key: str = os.getenv("HF_TOKEN", "")
-    local_image_name: str = os.getenv("LOCAL_IMAGE_NAME", "")
-    env_base_url: str = os.getenv("ENV_BASE_URL", "")
+    openai_base_url: str = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
+    model_name: str = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
+    openai_api_key: str = os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY") or ""
+    local_image_name: str = os.getenv("LOCAL_IMAGE_NAME") or ""
+    env_base_url: str = os.getenv("ENV_BASE_URL") or ""
+    benchmark: str = os.getenv("SEARCH_ENV_BENCHMARK", "search_env")
     num_episodes: int = int(os.getenv("NUM_EPISODES", "1") or "1")
     search_top_k: int = int(os.getenv("SEARCH_TOP_K", "5"))
     read_top_k: int = int(os.getenv("READ_TOP_K", "2"))
     temperature: float = float(os.getenv("TEMPERATURE", "0.2"))
     max_tokens: int = int(os.getenv("MAX_COMPLETION_TOKENS", "350"))
     max_retries: int = 4
-    log_file: str = os.getenv("LOG_FILE", "").strip()
     char_limit: int = 800
     soft_budget_threshold: float = 0.75
     hard_budget_threshold: float = 0.95
@@ -81,41 +76,22 @@ class Config:
 
 
 CFG = Config()
+
 STOPWORDS = {
-    "a",
-    "an",
-    "and",
-    "are",
-    "as",
-    "at",
-    "by",
-    "did",
-    "for",
-    "from",
-    "how",
-    "in",
-    "is",
-    "it",
-    "of",
-    "on",
-    "or",
-    "the",
-    "to",
-    "was",
-    "were",
-    "what",
-    "when",
-    "where",
-    "which",
-    "who",
-    "much",
-    "compare",
-    "compared",
+    "a", "an", "and", "are", "as", "at", "by", "did", "for", "from",
+    "how", "in", "is", "it", "of", "on", "or", "the", "to", "was",
+    "were", "what", "when", "where", "which", "who", "much",
+    "compare", "compared",
 }
+
+_RE_WHITESPACE = re.compile(r"\s+")
+_RE_WORD = re.compile(r"\w+")
+_RE_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+_RE_DIGIT = re.compile(r"\d")
 
 
 def clean(text: str) -> str:
-    return re.sub(r"\s+", " ", text).strip()
+    return _RE_WHITESPACE.sub(" ", text).strip()
 
 
 def truncate(text: str, limit: int = 200) -> str:
@@ -123,115 +99,33 @@ def truncate(text: str, limit: int = 200) -> str:
     return text if len(text) <= limit else text[: limit - 3] + "..."
 
 
-class Logger:
-    def __init__(self):
-        self._tasks: Set[asyncio.Task] = set()
-        self._lock: Optional[asyncio.Lock] = None
-        self.episode = 0
-        self.task = ""
-        self.backend = ""
-
-    def _record(self, event: str, **data) -> Dict[str, Any]:
-        return {
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "event": event,
-            "episode": self.episode,
-            "task": self.task[:80],
-            "backend": self.backend,
-            "model": CFG.model_name,
-            **data,
-        }
-
-    def _write(self, record: Dict[str, Any]):
-        if not CFG.log_file:
-            return
-        try:
-            loop = asyncio.get_running_loop()
-            t = loop.create_task(self._async_write(record))
-            self._tasks.add(t)
-            t.add_done_callback(self._tasks.discard)
-        except RuntimeError:
-            sync_log(CFG.log_file, record)
-
-    async def _async_write(self, record: Dict[str, Any]):
-        if self._lock is None:
-            self._lock = asyncio.Lock()
-        async with self._lock:
-            await async_log(CFG.log_file, record)
-
-    async def flush(self):
-        if self._tasks:
-            await asyncio.gather(*list(self._tasks), return_exceptions=True)
-
-    def start(self, task: str, backend: str, max_steps: int, budget: int):
-        print(f"[START] {clean(task)[:60]} | backend={backend}", flush=True)
-        self._write(self._record("start", max_steps=max_steps, budget=budget))
-
-    def step(
-        self,
-        step: int,
-        action: str,
-        done: bool,
-        tokens: int,
-        budget_pct: float,
-        error: Optional[str] = None,
-    ):
-        err = f" | error={clean(error)}" if error else ""
-        done_str = " [DONE]" if done else ""
-        print(f"[STEP] {step} {truncate(action, 70)}{done_str}{err}", flush=True)
-        self._write(
-            self._record(
-                "step",
-                step=step,
-                action=action,
-                done=done,
-                tokens=tokens,
-                budget_pct=round(budget_pct, 1),
-                error=error,
-            )
-        )
-
-    def budget(self, used: int, limit: int, pct: float):
-        bar = "=" * int(pct / 5) + "-" * (20 - int(pct / 5))
-        print(f"    [{bar}] {used:,}/{limit:,} ({pct:.1f}%)", flush=True)
-
-    def end(self, success: bool, steps: int, reward: float):
-        print(
-            f"[END] success={success} steps={steps} reward={reward:.3f}\n", flush=True
-        )
-        self._write(self._record("end", success=success, steps=steps, reward=reward))
-
-    def reward(self, step: int, metrics: Dict[str, Any]):
-        # Print reward breakdown to console
-        final = metrics.get("final_reward", 0) or 0
-        f_beta_r = metrics.get("f_beta_reward", 0) or 0
-        traj_r = metrics.get("trajectory_reward", 0) or 0
-        answer_r = metrics.get("answer_reward", 0) or 0
-        turn_p = metrics.get("turn_penalty", 0) or 0
-        prune_p = metrics.get("prune_penalty", 0) or 0
-
-        print(f"[REWARD] final={final:.3f}", flush=True)
-        print(
-            f"    components: f_beta={f_beta_r:.3f} traj={traj_r:.3f} answer={answer_r:.3f}",
-            flush=True,
-        )
-        if turn_p > 0 or prune_p > 0:
-            print(f"    penalties:  turn={turn_p:.3f} prune={prune_p:.3f}", flush=True)
-
-        self._write(
-            self._record(
-                "reward",
-                step=step,
-                metrics={
-                    k: round(v, 4) if isinstance(v, float) else v
-                    for k, v in metrics.items()
-                    if v is not None
-                },
-            )
-        )
+def log_start(task: str, env: str, model: str) -> None:
+    print(f"[START] task={task} env={env} model={model}", flush=True)
 
 
-LOG = Logger()
+def log_step(
+    step: int, action: str, reward: float, done: bool, error: Optional[str]
+) -> None:
+    error_val = error if error else "null"
+    done_val = str(done).lower()
+    action_clean = clean(action)[:120]
+    print(
+        f"[STEP] step={step} action={action_clean} "
+        f"reward={reward:.2f} done={done_val} error={error_val}",
+        flush=True,
+    )
+
+
+def log_end(
+    success: bool, steps: int, score: float, rewards: List[float]
+) -> None:
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    print(
+        f"[END] success={str(success).lower()} steps={steps} "
+        f"score={score:.3f} rewards={rewards_str}",
+        flush=True,
+    )
+
 
 TOOLS = [
     {
@@ -315,7 +209,7 @@ Available: search, read, prune, answer
 
 Strategy:
 1. Search for relevant evidence
-2. Read promising results into context  
+2. Read promising results into context
 3. Prune low-relevance chunks when budget > 75%
 4. Answer when context supports it
 
@@ -341,9 +235,7 @@ class ActionBuilder:
         self, query: str, top_k: Optional[int] = None
     ) -> Tuple[SearchAction, str]:
         k = top_k if top_k is not None else CFG.search_top_k
-        return SearchAction.make_search(
-            query, k
-        ), f"search('{truncate(query, 40)}', k={k})"
+        return SearchAction.make_search(query, k), f"search('{truncate(query, 40)}', k={k})"
 
     def read(self, chunk_ids: List[str]) -> Tuple[SearchAction, str]:
         return SearchAction.make_read(chunk_ids), f"read({len(chunk_ids)} chunks)"
@@ -451,8 +343,7 @@ class ActionBuilder:
 
     def _extract_answer(self) -> str:
         question_words = {
-            w
-            for w in re.findall(r"\w+", self.obs.question.lower())
+            w for w in _RE_WORD.findall(self.obs.question.lower())
             if w not in STOPWORDS
         }
 
@@ -464,13 +355,13 @@ class ActionBuilder:
 
         scored_sentences = []
         for text in texts:
-            for sentence in re.split(r"(?<=[.!?])\s+", text):
+            for sentence in _RE_SENTENCE_SPLIT.split(text):
                 sentence = clean(sentence)
                 if not sentence:
                     continue
-                words = set(re.findall(r"\w+", sentence.lower()))
+                words = set(_RE_WORD.findall(sentence.lower()))
                 score = len(words & question_words)
-                if re.search(r"\d", sentence):
+                if _RE_DIGIT.search(sentence):
                     score += 1
                 if score > 0:
                     scored_sentences.append((score, sentence))
@@ -592,7 +483,7 @@ async def get_action(
 
     for attempt in range(CFG.max_retries):
         try:
-            request = {
+            request: Dict[str, Any] = {
                 "model": CFG.model_name,
                 "messages": messages,
                 "tools": TOOLS,
@@ -640,8 +531,8 @@ async def get_action(
                 await asyncio.sleep(delay)
             continue
 
-        except Exception as e:
-            if "JSON" in str(e) and attempt < CFG.max_retries - 1:
+        except Exception:
+            if attempt < CFG.max_retries - 1:
                 continue
             break
 
@@ -660,16 +551,14 @@ def update_context_cache(obs, cache: Dict[str, str]) -> Dict[str, str]:
 
 
 async def run_episode(
-    env, client: AsyncOpenAI, episode: int
-) -> Tuple[bool, int, float]:
+    env, client: AsyncOpenAI,
+) -> Tuple[bool, int, float, List[float]]:
     result = await env.reset()
     obs = result.observation
     max_steps = int(os.getenv("MAX_STEPS", "") or obs.max_steps or 20)
 
-    LOG.episode = episode
-    LOG.task = obs.question
-    LOG.backend = "bm25"
-    LOG.start(obs.question, LOG.backend, max_steps, obs.context_token_budget)
+    task_name = clean(obs.question)[:60]
+    log_start(task=task_name, env=CFG.benchmark, model=CFG.model_name)
 
     messages = [
         {"role": "system", "content": SYSTEM},
@@ -677,6 +566,7 @@ async def run_episode(
     ]
 
     full_context: Dict[str, str] = {}
+    rewards: List[float] = []
     total_reward = 0.0
     success = False
     steps = 0
@@ -686,60 +576,45 @@ async def run_episode(
             if result.done:
                 break
 
-            action, action_str, assistant_msg, tool_id = await get_action(
-                client, obs, step, max_steps, messages
-            )
+            try:
+                action, action_str, assistant_msg, tool_id = await get_action(
+                    client, obs, step, max_steps, messages
+                )
+            except Exception:
+                builder = ActionBuilder(obs)
+                action, action_str = builder.auto()
+                assistant_msg, tool_id = None, None
 
-            result = await env.step(action)
+            try:
+                result = await env.step(action)
+            except Exception as e:
+                # Env step failed — log and break
+                log_step(step=step, action=action_str, reward=0.0, done=True, error=str(e))
+                rewards.append(0.0)
+                steps = step
+                break
+
             obs = result.observation
             full_context = update_context_cache(obs, full_context)
 
             steps = step
+            step_reward = result.reward or 0.0
+            rewards.append(step_reward)
             error = (obs.action_result or {}).get("error")
 
-            LOG.step(
-                step,
-                action_str,
-                result.done,
-                obs.context_token_count,
-                obs.budget_usage_percent,
-                error,
+            log_step(
+                step=step,
+                action=action_str,
+                reward=step_reward,
+                done=result.done,
+                error=error,
             )
-
-            if obs.action_type in ("read", "prune"):
-                LOG.budget(
-                    obs.context_token_count,
-                    obs.context_token_budget,
-                    obs.budget_usage_percent,
-                )
 
             if result.done:
                 answer_result = obs.action_result or {}
-                # Get the final reward from the answer result
                 total_reward = float(answer_result.get("final_reward", 0) or 0)
                 success = bool(
                     answer_result.get("answer_found_in_context") or total_reward > 0
-                )
-                LOG.reward(
-                    step,
-                    {
-                        "final_reward": answer_result.get("final_reward"),
-                        "pre_penalty_reward": answer_result.get("pre_penalty_reward"),
-                        "f_beta": answer_result.get("f_beta"),
-                        "f_beta_reward": answer_result.get("f_beta_reward"),
-                        "trajectory_recall": answer_result.get("trajectory_recall"),
-                        "trajectory_reward": answer_result.get("trajectory_reward"),
-                        "output_recall": answer_result.get("output_recall"),
-                        "output_precision": answer_result.get("output_precision"),
-                        "answer_correct": answer_result.get("answer_correct"),
-                        "answer_found_in_context": answer_result.get(
-                            "answer_found_in_context"
-                        ),
-                        "answer_reward": answer_result.get("answer_reward"),
-                        "turn_penalty": answer_result.get("turn_penalty"),
-                        "prune_penalty": answer_result.get("prune_penalty"),
-                        "beta_used": answer_result.get("beta_used"),
-                    },
                 )
                 break
 
@@ -755,46 +630,56 @@ async def run_episode(
                     },
                 ]
 
-    finally:
-        await LOG.flush()
-        LOG.end(success, steps, total_reward)
+    except Exception as e:
+        # Catch-all for unexpected errors within the episode loop
+        print(f"[DEBUG] Episode error: {e}", flush=True)
 
-    return success, steps, total_reward
+    # Compute score clamped to [0, 1]
+    score = max(0.0, min(1.0, total_reward))
+
+    log_end(success=success, steps=steps, score=score, rewards=rewards)
+    return success, steps, score, rewards
 
 
 async def create_env():
+    """Create environment, preferring LOCAL_IMAGE_NAME over ENV_BASE_URL."""
+    if CFG.local_image_name:
+        env_keys = ["MAX_STEPS", "MAX_CONTEXT_TOKENS", "SEARCH_TOP_K"]
+        env_vars = {k: v for k in env_keys if (v := os.getenv(k))}
+        return await SearchEnv.from_docker_image(CFG.local_image_name, env_vars=env_vars)
+
     if CFG.env_base_url:
         env = SearchEnv(base_url=CFG.env_base_url)
         await env.connect()
         return env
 
-    if not CFG.local_image_name:
-        raise RuntimeError("Set LOCAL_IMAGE_NAME or ENV_BASE_URL")
-
-    env_keys = [
-        "LOG_FILE",
-        "MAX_STEPS",
-        "MAX_CONTEXT_TOKENS",
-        "SEARCH_TOP_K",
-    ]
-    env_vars = {k: v for k in env_keys if (v := os.getenv(k))}
-    return await SearchEnv.from_docker_image(CFG.local_image_name, env_vars=env_vars)
+    raise RuntimeError("Set LOCAL_IMAGE_NAME or ENV_BASE_URL")
 
 
 async def main():
     if not CFG.openai_api_key:
-        raise RuntimeError("HF_TOKEN required")
+        print("[DEBUG] Warning: HF_TOKEN / API key not set, LLM calls will fail", flush=True)
 
     env = None
     try:
-        async with AsyncOpenAI(
-            base_url=CFG.openai_base_url, api_key=CFG.openai_api_key
-        ) as client:
-            env = await create_env()
-            for ep in range(1, CFG.num_episodes + 1):
-                await run_episode(env, client, ep)
+        client = AsyncOpenAI(
+            base_url=CFG.openai_base_url, api_key=CFG.openai_api_key or "no-key"
+        )
+        env = await create_env()
+
+        for ep in range(1, CFG.num_episodes + 1):
+            try:
+                await run_episode(env, client)
+            except Exception as e:
+                print(f"[DEBUG] Episode {ep} failed: {e}", flush=True)
+                log_end(success=False, steps=0, score=0.0, rewards=[])
+
+    except Exception as e:
+        # If env creation or client setup fails, still produce valid output
+        print(f"[DEBUG] Fatal error: {e}", flush=True)
+        log_start(task="error", env=CFG.benchmark, model=CFG.model_name)
+        log_end(success=False, steps=0, score=0.0, rewards=[])
     finally:
-        await LOG.flush()
         if env:
             try:
                 await env.close()
@@ -802,9 +687,9 @@ async def main():
                 pass
 
 
-if __name__ == "__main__":
+def cli():
     asyncio.run(main())
 
 
-def cli():
+if __name__ == "__main__":
     asyncio.run(main())

@@ -11,39 +11,27 @@ try:
     from .models import (
         ActionType,
         AnswerActionPayload,
-        AnswerResult,
         Chunk,
         ChunkSummary,
         PruneActionPayload,
-        PruneResult,
         ReadActionPayload,
-        ReadResult,
         SearchAction,
         SearchActionPayload,
         SearchEnvConfig,
         SearchObservation,
-        SearchResult,
         SearchTask,
     )
 except ImportError:
     pass
 
 __all__ = [
-    # Client
     "SearchEnv",
-    # Action types
     "ActionType",
     "SearchAction",
     "SearchActionPayload",
     "ReadActionPayload",
     "PruneActionPayload",
     "AnswerActionPayload",
-    # Results
-    "SearchResult",
-    "ReadResult",
-    "PruneResult",
-    "AnswerResult",
-    # Models
     "Chunk",
     "ChunkSummary",
     "SearchObservation",

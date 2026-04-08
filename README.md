@@ -29,6 +29,36 @@ The environment rewards agents for:
 - Providing correct, evidence-backed answers
 - Efficient use of limited token budget
 
+## 🚀 Try It Now
+
+**Deployed Environment:** [https://aman045-openenv-search-rl.hf.space](https://aman045-openenv-search-rl.hf.space)
+
+### Quick Test (curl)
+
+```bash
+# Reset environment
+curl -X POST https://aman045-openenv-search-rl.hf.space/reset
+
+# Search for documents
+curl -X POST https://aman045-openenv-search-rl.hf.space/step \
+  -H "Content-Type: application/json" \
+  -d '{"action":{"action_type":"search","search":{"query":"Instagram","top_k":3}}}'
+```
+
+### Quick Test (Python)
+
+```python
+from openenv import make
+
+env = make("https://aman045-openenv-search-rl.hf.space")
+obs = env.reset()
+print(f"Question: {obs['question']}")
+
+# Your agent code here...
+```
+
+**📚 Full usage guide:** See [USAGE.md](./USAGE.md) for detailed examples in Python, JavaScript, and more.
+
 ## Quick Start
 
 ```python

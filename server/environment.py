@@ -20,29 +20,21 @@ except ImportError:
 try:
     from ..models import (
         ActionType,
-        AnswerResult,
         Chunk,
         ChunkSummary,
-        PruneResult,
-        ReadResult,
         SearchAction,
         SearchEnvConfig,
         SearchObservation,
-        SearchResult,
         SearchTask,
     )
 except ImportError:
     from models import (
         ActionType,
-        AnswerResult,
         Chunk,
         ChunkSummary,
-        PruneResult,
-        ReadResult,
         SearchAction,
         SearchEnvConfig,
         SearchObservation,
-        SearchResult,
         SearchTask,
     )
 
@@ -137,10 +129,16 @@ class SearchEnvironment(Environment):
         self._task_index += 1
         return task
 
+    @property
+    def _budget_usage(self) -> float:
+        if self.config.max_context_tokens <= 0:
+            return 0.0
+        return self._context_token_count / self.config.max_context_tokens
+
     def _get_budget_warning(self) -> Optional[str]:
         if self.config.max_context_tokens <= 0:
             return None
-        usage = self._context_token_count / self.config.max_context_tokens
+        usage = self._budget_usage
 
         if usage >= self.config.hard_budget_threshold:
             return (
@@ -176,11 +174,7 @@ class SearchEnvironment(Environment):
             )
             context_summaries.append(summary)
 
-        budget_usage = (
-            self._context_token_count / self.config.max_context_tokens
-            if self.config.max_context_tokens > 0
-            else 0.0
-        )
+        budget_usage = self._budget_usage
 
         return SearchObservation(
             question=self._current_task.question if self._current_task else "",
@@ -285,13 +279,8 @@ class SearchEnvironment(Environment):
                 reward=reward,
             )
 
-        # Check budget for non-prune/answer actions
-        if self.config.max_context_tokens > 0:
-            budget_usage = self._context_token_count / self.config.max_context_tokens
-        else:
-            budget_usage = 0.0
         if (
-            budget_usage >= self.config.hard_budget_threshold
+            self._budget_usage >= self.config.hard_budget_threshold
             and action.action_type not in [ActionType.PRUNE, ActionType.ANSWER]
         ):
             return self._create_observation(
@@ -302,7 +291,6 @@ class SearchEnvironment(Environment):
                 reward=-0.1,  # Small penalty for invalid action
             )
 
-        # Dispatch to action handler
         if action.action_type == ActionType.SEARCH:
             if action.search is None:
                 action_result = {"error": "Missing search payload"}
@@ -363,14 +351,11 @@ class SearchEnvironment(Environment):
             if r.snippet:
                 self._seen_texts.append(r.snippet)
 
-        # Create result
-        search_result = SearchResult(
-            query=query,
-            results=results,
-            total_found=len(results),
-        )
-
-        return search_result.model_dump()
+        return {
+            "query": query,
+            "results": [r.model_dump() for r in results],
+            "total_found": len(results),
+        }
 
     def _handle_read(self, chunk_ids: List[str]) -> Dict[str, Any]:
         """Handle read action."""
@@ -409,14 +394,12 @@ class SearchEnvironment(Environment):
         self._tracker.record_read([c.chunk_id for c in chunks_added])
         self._chunks_seen.update(chunk_ids)
 
-        read_result = ReadResult(
-            chunks=chunks_added,
-            tokens_added=tokens_added,
-            budget_exceeded=budget_exceeded,
-            chunks_truncated=chunks_truncated,
-        )
-
-        return read_result.model_dump()
+        return {
+            "chunks": [c.model_dump() for c in chunks_added],
+            "tokens_added": tokens_added,
+            "budget_exceeded": budget_exceeded,
+            "chunks_truncated": chunks_truncated,
+        }
 
     def _handle_prune(self, chunk_ids: List[str]) -> Dict[str, Any]:
         """Handle prune action."""
@@ -436,13 +419,11 @@ class SearchEnvironment(Environment):
         # Track
         self._tracker.record_prune(chunk_ids)
 
-        prune_result = PruneResult(
-            chunks_removed=chunks_removed,
-            tokens_freed=tokens_freed,
-            invalid_ids=invalid_ids,
-        )
-
-        return prune_result.model_dump()
+        return {
+            "chunks_removed": chunks_removed,
+            "tokens_freed": tokens_freed,
+            "invalid_ids": invalid_ids,
+        }
 
     def _handle_answer(
         self, answer: str, supporting_chunk_ids: List[str]
@@ -451,13 +432,8 @@ class SearchEnvironment(Environment):
         self._done = True
 
         if self._current_task is None:
-            answer_result = AnswerResult(
-                answer_submitted=answer,
-                final_reward=0.0,
-            )
-            return answer_result.model_dump()
+            return {"answer_submitted": answer, "final_reward": 0.0}
 
-        # Calculate reward
         gold_chunks = set(self._current_task.gold_chunk_ids)
 
         metrics = self.reward_calculator.calculate_reward(
@@ -475,27 +451,25 @@ class SearchEnvironment(Environment):
 
         self._last_metrics = metrics
 
-        answer_result = AnswerResult(
-            answer_submitted=answer,
-            final_reward=metrics.total_reward,
-            trajectory_recall=metrics.trajectory_recall,
-            output_recall=metrics.output_recall,
-            output_precision=metrics.output_precision,
-            f_beta=metrics.f_beta,
-            beta_used=metrics.beta,
-            answer_correct=metrics.answer_correct,
-            answer_found_in_context=metrics.answer_found_in_context,
-            answer_similarity=metrics.answer_similarity,
-            f_beta_reward=metrics.f_beta_reward,
-            trajectory_reward=metrics.trajectory_reward,
-            answer_reward=metrics.answer_reward,
-            turn_penalty=metrics.turn_penalty,
-            prune_penalty=metrics.prune_penalty,
-            pre_penalty_reward=metrics.pre_penalty_reward,
-            reward_floor=metrics.reward_floor,
-        )
-
-        return answer_result.model_dump()
+        return {
+            "answer_submitted": answer,
+            "final_reward": metrics.total_reward,
+            "trajectory_recall": metrics.trajectory_recall,
+            "output_recall": metrics.output_recall,
+            "output_precision": metrics.output_precision,
+            "f_beta": metrics.f_beta,
+            "beta_used": metrics.beta,
+            "answer_correct": metrics.answer_correct,
+            "answer_found_in_context": metrics.answer_found_in_context,
+            "answer_similarity": metrics.answer_similarity,
+            "f_beta_reward": metrics.f_beta_reward,
+            "trajectory_reward": metrics.trajectory_reward,
+            "answer_reward": metrics.answer_reward,
+            "turn_penalty": metrics.turn_penalty,
+            "prune_penalty": metrics.prune_penalty,
+            "pre_penalty_reward": metrics.pre_penalty_reward,
+            "reward_floor": metrics.reward_floor,
+        }
 
     @property
     def state(self) -> State:
@@ -566,79 +540,3 @@ def create_sample_tasks() -> List[SearchTask]:
     return get_all_tasks()
 
 
-if __name__ == "__main__":
-    # Test the environment
-    print("Creating sample corpus and tasks...")
-    corpus = create_sample_corpus()
-    tasks = create_sample_tasks()
-
-    # Print task statistics
-    stats = get_task_statistics()
-    print(f"Corpus: {stats['num_documents']} documents, {corpus.num_chunks} chunks")
-    print(f"Tasks: {stats['total_tasks']} total")
-    print(f"  - Easy: {stats['by_difficulty']['easy']}")
-    print(f"  - Medium: {stats['by_difficulty']['medium']}")
-    print(f"  - Hard: {stats['by_difficulty']['hard']}")
-    print(f"  - Domains: {stats['domains']}")
-
-    # Create environment
-    env = SearchEnvironment(corpus=corpus, tasks=tasks)
-
-    # Helper to safely get from action_result
-    def get_result(obs: SearchObservation, key: str, default: Any = None) -> Any:
-        if obs.action_result is None:
-            return default
-        return obs.action_result.get(key, default)
-
-    # Run a test episode
-    print("\n--- Test Episode ---")
-    obs = env.reset()
-    print(f"Question: {obs.question}")
-    print(f"Budget: {obs.context_token_count}/{obs.context_token_budget}")
-
-    # Search
-    action = SearchAction.make_search("Facebook Instagram acquisition")
-    obs = env.step(action)
-    results = get_result(obs, "results", [])
-    print(f"\nSearch results: {len(results)} chunks")
-    for r in results[:3]:
-        print(f"  - {r['chunk_id']}: {r['snippet'][:50]}...")
-
-    # Read first result
-    if results:
-        chunk_id = results[0]["chunk_id"]
-        action = SearchAction.make_read([chunk_id])
-        obs = env.step(action)
-        print(f"\nRead: added {get_result(obs, 'tokens_added', 0)} tokens")
-        print(f"Budget: {obs.context_token_count}/{obs.context_token_budget}")
-
-    # Search for founder
-    action = SearchAction.make_search("Mark Zuckerberg born birthplace")
-    obs = env.step(action)
-    results = get_result(obs, "results", [])
-    print(f"\nSearch results: {len(results)} chunks")
-
-    # Read
-    if results:
-        chunk_id = results[0]["chunk_id"]
-        action = SearchAction.make_read([chunk_id])
-        obs = env.step(action)
-        print(f"Read: added {get_result(obs, 'tokens_added', 0)} tokens")
-
-    # Answer
-    action = SearchAction.make_answer(
-        "Mark Zuckerberg was born in White Plains, New York",
-        supporting_chunk_ids=list(env._context_chunks.keys()),
-    )
-    obs = env.step(action)
-    print("\n--- Episode Complete ---")
-    print(f"Answer correct: {get_result(obs, 'answer_correct')}")
-    print(f"F-beta: {get_result(obs, 'f_beta', 0):.3f}")
-    print(f"Trajectory recall: {get_result(obs, 'trajectory_recall', 0):.3f}")
-    print(f"Output recall: {get_result(obs, 'output_recall', 0):.3f}")
-    print(f"Final reward: {get_result(obs, 'final_reward', 0):.3f}")
-
-    # Verify reward is in valid range: [0.0, 1.0] (clamped per OpenEnv spec)
-    reward = get_result(obs, "final_reward", 0)
-    assert 0.0 <= reward <= 1.0, f"Reward {reward} out of bounds [0.0, 1.0]!"
-    print(f"\n✓ Reward {reward:.3f} is within valid range [0.0, 1.0]")

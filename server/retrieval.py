@@ -46,6 +46,7 @@ class BM25Index:
         self.doc_lens: Dict[str, int] = {}  # chunk_id -> doc length
         self.avg_doc_len: float = 0.0
         self.corpus_size: int = 0
+        self._total_doc_len: int = 0
 
         # Inverted index: term -> {chunk_id: term_freq}
         self.inverted_index: Dict[str, Dict[str, int]] = defaultdict(dict)
@@ -66,7 +67,7 @@ class BM25Index:
     def add_chunk(self, chunk: Chunk) -> None:
         """Add a chunk to the index."""
         if chunk.chunk_id in self.chunks:
-            return  # Already indexed
+            return
 
         self.chunks[chunk.chunk_id] = chunk
 
@@ -91,10 +92,9 @@ class BM25Index:
                 self.doc_freqs[term] += 1
             self.inverted_index[term][chunk.chunk_id] = freq
 
-        # Update corpus stats
         self.corpus_size += 1
-        total_len = sum(self.doc_lens.values())
-        self.avg_doc_len = total_len / self.corpus_size if self.corpus_size > 0 else 0
+        self._total_doc_len += doc_len
+        self.avg_doc_len = self._total_doc_len / self.corpus_size
 
     def add_chunks(self, chunks: List[Chunk]) -> None:
         """Add multiple chunks to the index."""

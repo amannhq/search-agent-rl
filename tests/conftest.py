@@ -1,8 +1,14 @@
 """Shared pytest fixtures for the Search RL Environment tests."""
 
+from __future__ import annotations
+
 import sys
 from pathlib import Path
-from typing import Callable, List
+
+# Ensure project root is on sys.path before project imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from collections.abc import Callable
 
 import pytest
 
@@ -14,31 +20,28 @@ from server.environment import (
 )
 from server.retrieval import DocumentCorpus
 
-# Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
-
-@pytest.fixture
+@pytest.fixture(scope="session")
 def corpus() -> DocumentCorpus:
-    """Create a sample document corpus."""
+    """Create a sample document corpus (shared across all tests)."""
     return create_sample_corpus()
 
 
-@pytest.fixture
-def tasks() -> List[SearchTask]:
-    """Create sample tasks."""
+@pytest.fixture(scope="session")
+def tasks() -> list[SearchTask]:
+    """Create sample tasks (shared across all tests)."""
     return create_sample_tasks()
 
 
 @pytest.fixture
-def env(corpus: DocumentCorpus, tasks: List[SearchTask]) -> SearchEnvironment:
+def env(corpus: DocumentCorpus, tasks: list[SearchTask]) -> SearchEnvironment:
     """Create a configured environment with corpus and tasks."""
     return SearchEnvironment(corpus=corpus, tasks=tasks)
 
 
 @pytest.fixture
 def env_with_config(
-    corpus: DocumentCorpus, tasks: List[SearchTask]
+    corpus: DocumentCorpus, tasks: list[SearchTask]
 ) -> Callable[[SearchEnvConfig], SearchEnvironment]:
     """Factory fixture to create environment with custom config."""
 

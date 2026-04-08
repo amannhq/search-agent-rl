@@ -6,7 +6,7 @@ Uses an F-beta-based reward curriculum for iterative retrieval.
 """
 
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 from openenv.core.env_server.types import Action, Observation
 from pydantic import BaseModel, Field
 
@@ -141,95 +141,6 @@ class SearchAction(Action):
                 answer=answer, supporting_chunk_ids=supporting_chunk_ids or []
             ),
         )
-
-
-class SearchResult(BaseModel):
-    """Result of a search action."""
-
-    query: str = Field(..., description="The query that was issued")
-    results: List[ChunkSummary] = Field(
-        default_factory=list, description="Search results"
-    )
-    total_found: int = Field(default=0, description="Total matching documents")
-
-
-class ReadResult(BaseModel):
-    """Result of a read action."""
-
-    chunks: List[Chunk] = Field(default_factory=list, description="Full chunk content")
-    tokens_added: int = Field(default=0, description="Tokens added to context")
-    budget_exceeded: bool = Field(
-        default=False, description="True if couldn't fit all chunks"
-    )
-    chunks_truncated: int = Field(
-        default=0, description="Number of chunks that couldn't fit"
-    )
-
-
-class PruneResult(BaseModel):
-    """Result of a prune action."""
-
-    chunks_removed: int = Field(default=0, description="Number of chunks removed")
-    tokens_freed: int = Field(default=0, description="Tokens freed from context")
-    invalid_ids: List[str] = Field(
-        default_factory=list, description="IDs that weren't in context"
-    )
-
-
-class AnswerResult(BaseModel):
-    """Result of an answer action (episode end)."""
-
-    answer_submitted: str = Field(..., description="The submitted answer")
-    final_reward: float = Field(default=0.0, description="Final episode reward")
-
-    # Evaluation metrics
-    trajectory_recall: float = Field(
-        default=0.0, description="% of gold chunks ever retrieved"
-    )
-    output_recall: float = Field(
-        default=0.0, description="% of gold chunks in final context"
-    )
-    output_precision: float = Field(
-        default=0.0, description="% of context that is gold"
-    )
-    f_beta: float = Field(default=0.0, description="F-beta score")
-    beta_used: float = Field(
-        default=4.0, description="Beta value used when computing F-beta"
-    )
-    answer_correct: bool = Field(
-        default=False, description="Whether answer matches gold"
-    )
-    answer_found_in_context: bool = Field(
-        default=False,
-        description="Whether a kept chunk directly contains the gold answer",
-    )
-    answer_similarity: float = Field(
-        default=0.0, description="Similarity between answer and gold answer"
-    )
-    f_beta_reward: float = Field(
-        default=0.0, description="Weighted F-beta contribution to total reward"
-    )
-    trajectory_reward: float = Field(
-        default=0.0, description="Weighted trajectory contribution to total reward"
-    )
-    answer_reward: float = Field(
-        default=0.0, description="Evidence-backed answer bonus contribution"
-    )
-    turn_penalty: float = Field(
-        default=0.0, description="Turn-count penalty applied to the episode"
-    )
-    prune_penalty: float = Field(
-        default=0.0, description="Excessive-pruning penalty applied to the episode"
-    )
-    pre_penalty_reward: float = Field(
-        default=0.0, description="Reward before penalties are subtracted"
-    )
-    reward_floor: float = Field(
-        default=0.0, description="Lower clamp floor for completed trajectories"
-    )
-
-
-ActionResult = Union[SearchResult, ReadResult, PruneResult, AnswerResult]
 
 
 class SearchObservation(Observation):

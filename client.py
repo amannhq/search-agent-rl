@@ -1,14 +1,19 @@
 """Search RL Environment Client."""
 
-from typing import Any, Dict, List, Optional
+from __future__ import annotations
+
+from typing import Any
+
 from openenv.core import EnvClient
 from openenv.core.client_types import StepResult
 from openenv.core.env_server.types import State
+
 from .models import (
     ChunkSummary,
     SearchAction,
     SearchObservation,
 )
+
 
 class SearchEnv(EnvClient[SearchAction, SearchObservation, State]):
     """
@@ -47,60 +52,18 @@ class SearchEnv(EnvClient[SearchAction, SearchObservation, State]):
         ...     client.close()
     """
 
-    def _step_payload(self, action: SearchAction) -> Dict[str, Any]:
-        """
-        Convert SearchAction to JSON payload for step message.
+    def _step_payload(self, action: SearchAction) -> dict[str, Any]:
+        """Convert SearchAction to JSON payload for step message."""
+        return action.model_dump(mode="json", exclude_none=True, exclude={"metadata"})
 
-        Args:
-            action: SearchAction instance
-
-        Returns:
-            Dictionary representation suitable for JSON encoding
-        """
-        payload: Dict[str, Any] = {"action_type": action.action_type.value}
-
-        if action.search is not None:
-            payload["search"] = {
-                "query": action.search.query,
-                "top_k": action.search.top_k,
-            }
-        if action.read is not None:
-            payload["read"] = {"chunk_ids": action.read.chunk_ids}
-        if action.prune is not None:
-            payload["prune"] = {"chunk_ids": action.prune.chunk_ids}
-        if action.answer is not None:
-            payload["answer"] = {
-                "answer": action.answer.answer,
-                "supporting_chunk_ids": action.answer.supporting_chunk_ids,
-            }
-
-        return payload
-
-    def _parse_result(self, payload: Dict[str, Any]) -> StepResult[SearchObservation]:
-        """
-        Parse server response into StepResult[SearchObservation].
-
-        Args:
-            payload: JSON response data from server
-
-        Returns:
-            StepResult with SearchObservation
-        """
+    def _parse_result(self, payload: dict[str, Any]) -> StepResult[SearchObservation]:
+        """Parse server response into StepResult[SearchObservation]."""
         obs_data = payload.get("observation", {})
 
-        # Parse context chunks
-        context_chunks = []
-        for chunk_data in obs_data.get("context_chunks", []):
-            context_chunks.append(
-                ChunkSummary(
-                    chunk_id=chunk_data.get("chunk_id", ""),
-                    document_id=chunk_data.get("document_id", ""),
-                    title=chunk_data.get("title", ""),
-                    snippet=chunk_data.get("snippet", ""),
-                    score=chunk_data.get("score", 0.0),
-                    token_count=chunk_data.get("token_count", 0),
-                )
-            )
+        context_chunks = [
+            ChunkSummary.model_validate(c)
+            for c in obs_data.get("context_chunks", [])
+        ]
 
         observation = SearchObservation(
             question=obs_data.get("question", ""),
@@ -126,16 +89,8 @@ class SearchEnv(EnvClient[SearchAction, SearchObservation, State]):
             done=payload.get("done", False),
         )
 
-    def _parse_state(self, payload: Dict[str, Any]) -> State:
-        """
-        Parse server response into State object.
-
-        Args:
-            payload: JSON response from state request
-
-        Returns:
-            State object with episode_id and step_count
-        """
+    def _parse_state(self, payload: dict[str, Any]) -> State:
+        """Parse server response into State object."""
         return State(
             episode_id=payload.get("episode_id"),
             step_count=payload.get("step_count", 0),
@@ -144,59 +99,21 @@ class SearchEnv(EnvClient[SearchAction, SearchObservation, State]):
     async def search(
         self, query: str, top_k: int = 10
     ) -> StepResult[SearchObservation]:
-        """
-        Issue a search query.
+        """Issue a search query."""
+        return await self.step(SearchAction.make_search(query, top_k))
 
-        Args:
-            query: Natural language search query
-            top_k: Number of results to retrieve
+    async def read(self, chunk_ids: list[str]) -> StepResult[SearchObservation]:
+        """Read full content of chunks into context."""
+        return await self.step(SearchAction.make_read(chunk_ids))
 
-        Returns:
-            StepResult with search results in observation.action_result
-        """
-        action = SearchAction.make_search(query, top_k)
-        return await self.step(action)
-
-    async def read(self, chunk_ids: List[str]) -> StepResult[SearchObservation]:
-        """
-        Read full content of chunks into context.
-
-        Args:
-            chunk_ids: List of chunk IDs to read
-
-        Returns:
-            StepResult with read result in observation.action_result
-        """
-        action = SearchAction.make_read(chunk_ids)
-        return await self.step(action)
-
-    async def prune(self, chunk_ids: List[str]) -> StepResult[SearchObservation]:
-        """
-        Remove chunks from context to free token budget.
-
-        Args:
-            chunk_ids: List of chunk IDs to remove
-
-        Returns:
-            StepResult with prune result in observation.action_result
-        """
-        action = SearchAction.make_prune(chunk_ids)
-        return await self.step(action)
+    async def prune(self, chunk_ids: list[str]) -> StepResult[SearchObservation]:
+        """Remove chunks from context to free token budget."""
+        return await self.step(SearchAction.make_prune(chunk_ids))
 
     async def answer(
         self,
         answer: str,
-        supporting_chunk_ids: Optional[List[str]] = None,
+        supporting_chunk_ids: list[str] | None = None,
     ) -> StepResult[SearchObservation]:
-        """
-        Submit final answer and end episode.
-
-        Args:
-            answer: The agent's final answer
-            supporting_chunk_ids: Chunk IDs that support the answer
-
-        Returns:
-            StepResult with final reward and evaluation metrics
-        """
-        action = SearchAction.make_answer(answer, supporting_chunk_ids)
-        return await self.step(action)
+        """Submit final answer and end episode."""
+        return await self.step(SearchAction.make_answer(answer, supporting_chunk_ids))

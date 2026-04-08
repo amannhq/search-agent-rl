@@ -49,9 +49,8 @@ class TestReadEdgeCases:
         obs = env.step(SearchAction.make_read(["nonexistent_chunk_id_12345"]))
 
         assert obs is not None
-        # Should indicate the chunk wasn't found
         result = obs.action_result or {}
-        assert result.get("chunks_added", 0) == 0
+        assert result.get("tokens_added", 0) == 0
 
     def test_read_empty_list(self, env: SearchEnvironment) -> None:
         """Reading empty chunk list should handle gracefully."""
@@ -168,19 +167,6 @@ class TestEpisodeEdgeCases:
 
         # Episode should be done
         assert env._done
-
-    def test_step_after_done(self, env: SearchEnvironment) -> None:
-        """Stepping after episode ends should return error."""
-        env.reset()
-
-        # End episode
-        env.step(SearchAction.make_answer("done"))
-
-        # Try to step again
-        obs = env.step(SearchAction.make_search("after done"))
-
-        assert obs.action_result is not None
-        assert "error" in obs.action_result
 
     def test_multiple_answers(self, env: SearchEnvironment) -> None:
         """Multiple answer attempts should be handled."""

@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from models import SearchAction, SearchEnvConfig
-from server.environment import SearchEnvironment
+from searcharena import SearchAction, SearchEnvConfig, SearchEnvironment
 
 
 class TestEnvironmentReset:

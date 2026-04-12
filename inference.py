@@ -54,7 +54,9 @@ SearchEnv = _load_search_env()
 # ---------------------------------------------------------------------------
 
 BENCHMARK = os.getenv("SEARCH_ENV_BENCHMARK", "search_env")
-ENV_BASE_URL = os.getenv("ENV_BASE_URL", "")
+# Default to HuggingFace space if no environment URL provided
+DEFAULT_ENV_URL = "https://aman045-openenv-search-rl.hf.space"
+ENV_BASE_URL = os.getenv("ENV_BASE_URL", "") or DEFAULT_ENV_URL
 LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME", "")
 
 # CRITICAL: These are injected by submission system
@@ -565,11 +567,10 @@ async def create_env() -> Any:
         env_keys = ["MAX_STEPS", "MAX_CONTEXT_TOKENS", "SEARCH_TOP_K"]
         env_vars = {k: v for k in env_keys if (v := os.getenv(k))}
         return await SearchEnv.from_docker_image(LOCAL_IMAGE_NAME, env_vars=env_vars)
-    if ENV_BASE_URL:
-        env = SearchEnv(base_url=ENV_BASE_URL)
-        await env.connect()
-        return env
-    raise RuntimeError("Set LOCAL_IMAGE_NAME or ENV_BASE_URL")
+    # ENV_BASE_URL defaults to HF space if not set
+    env = SearchEnv(base_url=ENV_BASE_URL)
+    await env.connect()
+    return env
 
 
 async def main() -> None:

@@ -136,8 +136,17 @@ async def reset(request: ResetRequest | None = None) -> ResetResponse:
     if _env is None:
         raise HTTPException(status_code=500, detail="Environment not initialized")
 
-    task_id = request.task_id if request else None
-    obs = _env.reset(task_id=task_id)
+    # Find task by ID if specified
+    task = None
+    if request and request.task_id:
+        for t in _env.tasks:
+            if t.task_id == request.task_id:
+                task = t
+                break
+        if task is None:
+            raise HTTPException(status_code=404, detail=f"Task not found: {request.task_id}")
+
+    obs = _env.reset(task=task)
 
     return ResetResponse(
         observation=obs.model_dump(),

@@ -4,8 +4,8 @@ from typing import List
 
 import pytest
 
-from models import SearchTask
-from server.tasks import (
+from searcharena import SearchTask
+from data import (
     get_all_tasks,
     get_documents,
     get_task_by_id,

@@ -1,4 +1,7 @@
-"""Server entrypoint for the search environment."""
+"""Server entrypoint for the search environment.
+
+This is a thin wrapper - all logic lives in the searcharena package.
+"""
 
 import argparse
 
@@ -9,20 +12,14 @@ except Exception as e:  # pragma: no cover
         "openenv is required for the web interface. Install dependencies with '\n    uv sync\n'"
     ) from e
 
-try:
-    from ..models import SearchAction, SearchEnvConfig, SearchObservation
-    from .environment import (
-        SearchEnvironment,
-        create_sample_corpus,
-        create_sample_tasks,
-    )
-except ImportError:
-    from models import SearchAction, SearchEnvConfig, SearchObservation
-    from server.environment import (
-        SearchEnvironment,
-        create_sample_corpus,
-        create_sample_tasks,
-    )
+from searcharena import (
+    SearchAction,
+    SearchEnvConfig,
+    SearchEnvironment,
+    SearchObservation,
+    create_sample_corpus,
+    create_sample_tasks,
+)
 
 
 def create_environment() -> SearchEnvironment:

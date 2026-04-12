@@ -169,7 +169,7 @@ class SearchEnvironment(Environment):
             return SearchObservation(
                 question="No tasks available. Please add tasks to the environment.",
                 done=True,
-                reward=0.0,
+                reward=0.001,
             )
 
         return self._create_observation()
@@ -195,7 +195,7 @@ class SearchEnvironment(Environment):
             return self._create_observation(
                 action_result={"error": "Episode already finished"},
                 action_type=action.action_type.value,
-                reward=0.0,
+                reward=0.001,
             )
 
         self._state.step_count += 1
@@ -219,7 +219,7 @@ class SearchEnvironment(Environment):
                 max_steps=self.config.max_steps,
                 max_tokens=self.config.max_context_tokens,
             )
-            reward = self._last_metrics.total_reward if self._last_metrics else 0.0
+            reward = self._last_metrics.total_reward if self._last_metrics else 0.001
             return self._create_observation(
                 action_result=action_result,
                 action_type="timeout",
@@ -286,7 +286,7 @@ class SearchEnvironment(Environment):
             else:
                 self._done = True
                 if self._current_task is None:
-                    action_result = {"answer_submitted": action.answer.answer, "final_reward": 0.0}
+                    action_result = {"answer_submitted": action.answer.answer, "final_reward": 0.001}
                 else:
                     action_result, self._last_metrics = handle_answer(
                         answer=action.answer.answer,
@@ -302,7 +302,7 @@ class SearchEnvironment(Environment):
                         max_steps=self.config.max_steps,
                         max_tokens=self.config.max_context_tokens,
                     )
-                    reward = self._last_metrics.total_reward if self._last_metrics else 0.0
+                    reward = self._last_metrics.total_reward if self._last_metrics else 0.001
 
         return self._create_observation(
             action_result=action_result,

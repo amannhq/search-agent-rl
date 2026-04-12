@@ -561,7 +561,8 @@ async def run_episode(env: Any, client: AsyncOpenAI, task_id: str | None = None)
     except Exception:
         pass
 
-    score = max(0.0, min(1.0, total_reward))
+    # Score must be strictly between 0 and 1 (not 0.0, not 1.0)
+    score = max(0.001, min(0.999, total_reward))
     log_end(success=success, steps=steps, score=score, rewards=rewards)
     return success, steps, score, rewards
 
@@ -654,8 +655,8 @@ async def main() -> None:
                 scores[task_id] = score
             except Exception as e:
                 print(f"Task {task_id} failed: {e}", file=sys.stderr, flush=True)
-                log_end(success=False, steps=0, score=0.0, rewards=[])
-                scores[task_id] = 0.0
+                log_end(success=False, steps=0, score=0.001, rewards=[])
+                scores[task_id] = 0.001
 
         # Print summary
         print("\n--- SUMMARY ---", flush=True)
@@ -666,7 +667,7 @@ async def main() -> None:
     except Exception as e:
         print(f"Fatal error: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
         log_start(task="error", env=BENCHMARK, model=MODEL_NAME)
-        log_end(success=False, steps=0, score=0.0, rewards=[])
+        log_end(success=False, steps=0, score=0.001, rewards=[])
         raise
     finally:
         if env:

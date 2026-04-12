@@ -1,7 +1,12 @@
-"""
-Task and corpus loader for the Search RL Environment.
+"""Task and corpus data for the Search RL Environment.
 
-Loads tasks and documents from JSON files in this data directory.
+Static data:
+    - get_documents(): Load corpus documents
+    - get_all_tasks(): Load all tasks
+    - get_tasks_by_difficulty(): Filter by difficulty
+
+Data generation (requires datagen extra):
+    python -m data.generator.domains.web --seeds seeds.txt --output ./output
 """
 
 from __future__ import annotations

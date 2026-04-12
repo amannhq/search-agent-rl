@@ -62,6 +62,16 @@ API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
 API_KEY = os.getenv("API_KEY") or os.getenv("HF_TOKEN", "")
 MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
 
+# Task IDs to run (at least 3 required for submission)
+TASK_IDS = tuple(
+    t.strip()
+    for t in os.getenv(
+        "SEARCH_ENV_TASKS",
+        "sample_tech_instagram_001,sample_tech_whatsapp_001,sample_tech_facebook_acquisitions_001,sample_science_curie_001,sample_history_berlin_wall_001",
+    ).split(",")
+    if t.strip()
+)
+
 NUM_EPISODES = int(os.getenv("NUM_EPISODES", "1") or "1")
 SEARCH_TOP_K = int(os.getenv("SEARCH_TOP_K", "5"))
 READ_TOP_K = int(os.getenv("READ_TOP_K", "2"))
@@ -487,8 +497,8 @@ def update_context_cache(obs: Any, cache: dict[str, str]) -> dict[str, str]:
 # Episode runner
 # ---------------------------------------------------------------------------
 
-async def run_episode(env: Any, client: AsyncOpenAI) -> tuple[bool, int, float, list[float]]:
-    result = await env.reset()
+async def run_episode(env: Any, client: AsyncOpenAI, task_id: str | None = None) -> tuple[bool, int, float, list[float]]:
+    result = await env.reset(task_id=task_id) if task_id else await env.reset()
     obs = result.observation
     max_steps = int(os.getenv("MAX_STEPS", "") or obs.max_steps or 20)
 
@@ -577,9 +587,16 @@ class LocalEnvWrapper:
             tasks=create_sample_tasks(),
         )
 
-    async def reset(self, **kwargs) -> Any:
+    async def reset(self, task_id: str | None = None, **kwargs) -> Any:
         from openenv.core.client_types import StepResult
-        obs = self._env.reset(**kwargs)
+        # Find task by ID if specified
+        task = None
+        if task_id:
+            for t in self._env.tasks:
+                if t.task_id == task_id:
+                    task = t
+                    break
+        obs = self._env.reset(task=task, **kwargs)
         return StepResult(observation=obs, reward=0.0, done=False)
 
     async def step(self, action: SearchAction) -> Any:
@@ -619,19 +636,33 @@ async def main() -> None:
         raise RuntimeError("API_BASE_URL environment variable is required but not set")
 
     print(f"Config: base_url={API_BASE_URL} model={MODEL_NAME} api_key={'set' if API_KEY else 'MISSING'}", file=sys.stderr, flush=True)
+    print(f"Tasks: {TASK_IDS}", file=sys.stderr, flush=True)
 
     env = None
+    scores: dict[str, float] = {}
     try:
         client = AsyncOpenAI(
             base_url=API_BASE_URL,
             api_key=API_KEY,
         )
         env = await create_env()
-        for _ in range(NUM_EPISODES):
+
+        # Run each task (at least 3 required for submission)
+        for task_id in TASK_IDS:
             try:
-                await run_episode(env, client)
-            except Exception:
+                success, steps, score, rewards = await run_episode(env, client, task_id=task_id)
+                scores[task_id] = score
+            except Exception as e:
+                print(f"Task {task_id} failed: {e}", file=sys.stderr, flush=True)
                 log_end(success=False, steps=0, score=0.0, rewards=[])
+                scores[task_id] = 0.0
+
+        # Print summary
+        print("\n--- SUMMARY ---", flush=True)
+        for tid, sc in scores.items():
+            print(f"  {tid}: {sc:.3f}", flush=True)
+        print(f"  Average: {sum(scores.values()) / len(scores):.3f}", flush=True)
+
     except Exception as e:
         print(f"Fatal error: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
         log_start(task="error", env=BENCHMARK, model=MODEL_NAME)

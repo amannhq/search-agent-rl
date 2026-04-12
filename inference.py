@@ -54,8 +54,7 @@ SearchEnv = _load_search_env()
 # ---------------------------------------------------------------------------
 
 BENCHMARK = os.getenv("SEARCH_ENV_BENCHMARK", "search_env")
-# Default to localhost:8000 (where Docker container runs the server)
-ENV_BASE_URL = os.getenv("ENV_BASE_URL", "http://localhost:8000")
+ENV_BASE_URL = os.getenv("ENV_BASE_URL", "")
 LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME", "")
 
 # CRITICAL: These are injected by submission system
@@ -561,17 +560,55 @@ async def run_episode(env: Any, client: AsyncOpenAI) -> tuple[bool, int, float, 
 # Entry point
 # ---------------------------------------------------------------------------
 
+class LocalEnvWrapper:
+    """Run SearchEnvironment in-process without HTTP server."""
+
+    def __init__(self):
+        from searcharena import (
+            SearchEnvironment,
+            SearchEnvConfig,
+            create_sample_corpus,
+            create_sample_tasks,
+        )
+        config = SearchEnvConfig()
+        self._env = SearchEnvironment(
+            config=config,
+            corpus=create_sample_corpus(config),
+            tasks=create_sample_tasks(),
+        )
+
+    async def reset(self, **kwargs) -> Any:
+        from openenv.core.client_types import StepResult
+        obs = self._env.reset(**kwargs)
+        return StepResult(observation=obs, reward=0.0, done=False)
+
+    async def step(self, action: SearchAction) -> Any:
+        from openenv.core.client_types import StepResult
+        obs = self._env.step(action)
+        return StepResult(
+            observation=obs,
+            reward=obs.reward if obs.reward is not None else 0.0,
+            done=obs.done,
+        )
+
+    async def close(self) -> None:
+        self._env.close()
+
+
 async def create_env() -> Any:
-    # Priority: LOCAL_IMAGE_NAME > ENV_BASE_URL (defaults to localhost:8000)
+    # Priority: LOCAL_IMAGE_NAME > ENV_BASE_URL > in-process (default)
     if LOCAL_IMAGE_NAME:
         env_keys = ["MAX_STEPS", "MAX_CONTEXT_TOKENS", "SEARCH_TOP_K"]
         env_vars = {k: v for k in env_keys if (v := os.getenv(k))}
         return await SearchEnv.from_docker_image(LOCAL_IMAGE_NAME, env_vars=env_vars)
 
-    # Connect to server at ENV_BASE_URL (defaults to localhost:8000)
-    env = SearchEnv(base_url=ENV_BASE_URL)
-    await env.connect()
-    return env
+    if ENV_BASE_URL:
+        env = SearchEnv(base_url=ENV_BASE_URL)
+        await env.connect()
+        return env
+
+    # Default: run environment in-process (no server needed)
+    return LocalEnvWrapper()
 
 
 async def main() -> None:

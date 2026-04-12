@@ -14,7 +14,7 @@ class EpisodeMetrics:
     """Metrics for a single episode."""
 
     task_id: str
-    difficulty: str = "medium"
+    level: int = 0
     domain: str = "general"
 
     # Core metrics
@@ -43,7 +43,7 @@ class EpisodeMetrics:
         """Convert to dictionary."""
         return {
             "task_id": self.task_id,
-            "difficulty": self.difficulty,
+            "level": self.level,
             "domain": self.domain,
             "total_reward": self.total_reward,
             "success": self.success,
@@ -79,10 +79,8 @@ class TrainingMetrics:
     reward_min: float = 0.0
     reward_max: float = 0.0
 
-    # Success rates by difficulty
-    success_rate_easy: float = 0.0
-    success_rate_medium: float = 0.0
-    success_rate_hard: float = 0.0
+    # Success rates by level
+    success_rate_by_level: dict[int, float] = field(default_factory=dict)
 
     # Efficiency metrics
     avg_steps: float = 0.0
@@ -109,9 +107,7 @@ class TrainingMetrics:
             "reward_std": self.reward_std,
             "reward_min": self.reward_min,
             "reward_max": self.reward_max,
-            "success_rate_easy": self.success_rate_easy,
-            "success_rate_medium": self.success_rate_medium,
-            "success_rate_hard": self.success_rate_hard,
+            "success_rate_by_level": self.success_rate_by_level,
             "avg_steps": self.avg_steps,
             "avg_searches": self.avg_searches,
             "avg_budget_utilization": self.avg_budget_utilization,
@@ -150,10 +146,17 @@ class TrainingMetrics:
         reward_mean = sum(rewards) / n
         reward_std = (sum((r - reward_mean) ** 2 for r in rewards) / n) ** 0.5
 
-        # Success rates by difficulty
-        easy = [e for e in episodes if e.difficulty == "easy"]
-        medium = [e for e in episodes if e.difficulty == "medium"]
-        hard = [e for e in episodes if e.difficulty == "hard"]
+        # Success rates by level
+        by_level: dict[int, list[EpisodeMetrics]] = {}
+        for e in episodes:
+            if e.level not in by_level:
+                by_level[e.level] = []
+            by_level[e.level].append(e)
+
+        success_rate_by_level = {
+            level: sum(1 for e in eps if e.success) / max(1, len(eps))
+            for level, eps in by_level.items()
+        }
 
         return cls(
             step=step,
@@ -163,9 +166,7 @@ class TrainingMetrics:
             reward_std=reward_std,
             reward_min=min(rewards),
             reward_max=max(rewards),
-            success_rate_easy=sum(1 for e in easy if e.success) / max(1, len(easy)),
-            success_rate_medium=sum(1 for e in medium if e.success) / max(1, len(medium)),
-            success_rate_hard=sum(1 for e in hard if e.success) / max(1, len(hard)),
+            success_rate_by_level=success_rate_by_level,
             avg_steps=sum(e.num_steps for e in episodes) / n,
             avg_searches=sum(e.num_searches for e in episodes) / n,
             avg_budget_utilization=sum(e.budget_utilization for e in episodes) / n,
@@ -258,9 +259,9 @@ class MetricsLogger:
         print(f"Reward: {metrics.reward_mean:.3f} +/- {metrics.reward_std:.3f}")
         print(f"Success Rate: {metrics.episodes_successful}/{metrics.episodes_total} "
               f"({100*metrics.episodes_successful/max(1,metrics.episodes_total):.1f}%)")
-        print(f"  Easy: {100*metrics.success_rate_easy:.1f}% | "
-              f"Medium: {100*metrics.success_rate_medium:.1f}% | "
-              f"Hard: {100*metrics.success_rate_hard:.1f}%")
+        if metrics.success_rate_by_level:
+            level_strs = [f"L{level}: {100*rate:.1f}%" for level, rate in sorted(metrics.success_rate_by_level.items())]
+            print(f"  {' | '.join(level_strs)}")
         print(f"Avg Steps: {metrics.avg_steps:.1f} | "
               f"Avg Searches: {metrics.avg_searches:.1f}")
 

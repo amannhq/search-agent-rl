@@ -18,10 +18,10 @@ from searcharena.training.datasets import Episode
 class TestCurriculumScheduler:
     """Tests for curriculum learning scheduler."""
 
-    def test_initial_difficulty_is_easy(self):
-        """Scheduler starts at easy difficulty."""
+    def test_initial_level_is_zero(self):
+        """Scheduler starts at level 0."""
         scheduler = CurriculumScheduler()
-        assert scheduler.current_difficulty == "easy"
+        assert scheduler.current_level_int == 0
 
     def test_advance_after_success_threshold(self):
         """Scheduler advances after reaching success threshold."""
@@ -33,12 +33,12 @@ class TestCurriculumScheduler:
 
         # Record successful episodes
         for _ in range(5):
-            metrics = EpisodeMetrics(task_id="test", difficulty="easy", success=True)
+            metrics = EpisodeMetrics(task_id="test", level=0, success=True)
             scheduler.record_episode(metrics, step=100)
 
         advanced = scheduler.maybe_advance()
         assert advanced
-        assert scheduler.current_difficulty == "medium"
+        assert scheduler.current_level_int == 1
 
     def test_no_advance_below_threshold(self):
         """Scheduler does not advance below success threshold."""
@@ -52,19 +52,19 @@ class TestCurriculumScheduler:
         for i in range(5):
             metrics = EpisodeMetrics(
                 task_id=f"test_{i}",
-                difficulty="easy",
+                level=0,
                 success=i < 3,
             )
             scheduler.record_episode(metrics, step=100)
 
         advanced = scheduler.maybe_advance()
         assert not advanced
-        assert scheduler.current_difficulty == "easy"
+        assert scheduler.current_level_int == 0
 
-    def test_get_difficulty_weights(self):
-        """Difficulty weights sum to 1.0."""
+    def test_get_level_weights(self):
+        """Level weights sum to 1.0."""
         scheduler = CurriculumScheduler()
-        weights = scheduler.get_difficulty_weights()
+        weights = scheduler.get_level_weights()
         assert abs(sum(weights.values()) - 1.0) < 0.001
 
 
@@ -115,9 +115,9 @@ class TestTrainingMetrics:
     def test_from_episodes(self):
         """Can aggregate metrics from episodes."""
         episodes = [
-            EpisodeMetrics(task_id="1", total_reward=0.5, success=True, difficulty="easy"),
-            EpisodeMetrics(task_id="2", total_reward=0.3, success=False, difficulty="medium"),
-            EpisodeMetrics(task_id="3", total_reward=0.8, success=True, difficulty="easy"),
+            EpisodeMetrics(task_id="1", total_reward=0.5, success=True, level=0),
+            EpisodeMetrics(task_id="2", total_reward=0.3, success=False, level=1),
+            EpisodeMetrics(task_id="3", total_reward=0.8, success=True, level=0),
         ]
 
         metrics = TrainingMetrics.from_episodes(episodes, step=100)
@@ -125,8 +125,8 @@ class TestTrainingMetrics:
         assert metrics.episodes_total == 3
         assert metrics.episodes_successful == 2
         assert abs(metrics.reward_mean - 0.533) < 0.01
-        assert metrics.success_rate_easy == 1.0
-        assert metrics.success_rate_medium == 0.0
+        assert metrics.success_rate_by_level[0] == 1.0
+        assert metrics.success_rate_by_level[1] == 0.0
 
 
 class TestPromptBuilder:
@@ -151,37 +151,37 @@ class TestPromptBuilder:
 class TestTaskSampler:
     """Tests for task sampler."""
 
-    def test_sample_by_difficulty(self):
-        """Can sample tasks by difficulty weights."""
-        from searcharena.models import SearchTask
+    def test_sample_by_level(self):
+        """Can sample tasks by level weights."""
+        from searcharena.models import SearchTask, SupportingItem
 
         tasks = [
-            SearchTask(task_id="1", question="Q1", gold_answer="A1", gold_chunk_ids=["c1"], difficulty="easy"),
-            SearchTask(task_id="2", question="Q2", gold_answer="A2", gold_chunk_ids=["c2"], difficulty="medium"),
-            SearchTask(task_id="3", question="Q3", gold_answer="A3", gold_chunk_ids=["c3"], difficulty="hard"),
+            SearchTask(task_id="1", question="Q1", truth="A1", supporting_items=[SupportingItem(id="c1", reasoning="r")], level=0),
+            SearchTask(task_id="2", question="Q2", truth="A2", supporting_items=[SupportingItem(id="c2", reasoning="r")], level=1),
+            SearchTask(task_id="3", question="Q3", truth="A3", supporting_items=[SupportingItem(id="c3", reasoning="r")], level=2),
         ]
 
         sampler = TaskSampler(tasks, seed=42)
 
-        # Sample with 100% easy weight
-        samples = sampler.sample_by_difficulty(n=10, weights={"easy": 1.0, "medium": 0.0, "hard": 0.0})
-        assert all(t.difficulty == "easy" for t in samples)
+        # Sample with 100% level 0 weight
+        samples = sampler.sample_by_level(n=10, weights={0: 1.0, 1: 0.0, 2: 0.0})
+        assert all(t.level == 0 for t in samples)
 
     def test_stratified_sampling(self):
-        """Stratified sampling gets tasks from each difficulty."""
-        from searcharena.models import SearchTask
+        """Stratified sampling gets tasks from each level."""
+        from searcharena.models import SearchTask, SupportingItem
 
         tasks = [
-            SearchTask(task_id="1", question="Q1", gold_answer="A1", gold_chunk_ids=["c1"], difficulty="easy"),
-            SearchTask(task_id="2", question="Q2", gold_answer="A2", gold_chunk_ids=["c2"], difficulty="medium"),
-            SearchTask(task_id="3", question="Q3", gold_answer="A3", gold_chunk_ids=["c3"], difficulty="hard"),
+            SearchTask(task_id="1", question="Q1", truth="A1", supporting_items=[SupportingItem(id="c1", reasoning="r")], level=0),
+            SearchTask(task_id="2", question="Q2", truth="A2", supporting_items=[SupportingItem(id="c2", reasoning="r")], level=1),
+            SearchTask(task_id="3", question="Q3", truth="A3", supporting_items=[SupportingItem(id="c3", reasoning="r")], level=2),
         ]
 
         sampler = TaskSampler(tasks, seed=42)
-        samples = sampler.sample_stratified(n_per_difficulty=1)
+        samples = sampler.sample_stratified(n_per_level=1)
 
-        difficulties = {t.difficulty for t in samples}
-        assert difficulties == {"easy", "medium", "hard"}
+        levels = {t.level for t in samples}
+        assert levels == {0, 1, 2}
 
 
 class TestTrainingConfig:

@@ -23,8 +23,8 @@ class EvaluationResult:
     mean_reward: float = 0.0
     std_reward: float = 0.0
 
-    # Per-difficulty breakdown
-    metrics_by_difficulty: dict[str, dict[str, float]] = field(default_factory=dict)
+    # Per-level breakdown
+    metrics_by_level: dict[int, dict[str, float]] = field(default_factory=dict)
 
     # Per-domain breakdown
     metrics_by_domain: dict[str, dict[str, float]] = field(default_factory=dict)
@@ -54,7 +54,7 @@ class EvaluationResult:
                 "mean_reward": self.mean_reward,
                 "std_reward": self.std_reward,
             },
-            "by_difficulty": self.metrics_by_difficulty,
+            "by_level": self.metrics_by_level,
             "by_domain": self.metrics_by_domain,
             "metadata": {
                 "model_name": self.model_name,
@@ -83,7 +83,7 @@ class EvaluationResult:
             successful_episodes=data["summary"]["successful_episodes"],
             mean_reward=data["summary"]["mean_reward"],
             std_reward=data["summary"]["std_reward"],
-            metrics_by_difficulty=data.get("by_difficulty", {}),
+            metrics_by_level=data.get("by_level", {}),
             metrics_by_domain=data.get("by_domain", {}),
             episode_results=data.get("episodes", []),
             model_name=data["metadata"].get("model_name", ""),
@@ -101,13 +101,13 @@ class EvaluationResult:
               f"({100*self.success_rate:.1f}% success)")
         print(f"Mean Reward: {self.mean_reward:.3f} +/- {self.std_reward:.3f}")
 
-        if self.metrics_by_difficulty:
-            print("\nBy Difficulty:")
-            for diff, metrics in sorted(self.metrics_by_difficulty.items()):
+        if self.metrics_by_level:
+            print("\nBy Level:")
+            for level, metrics in sorted(self.metrics_by_level.items()):
                 sr = metrics.get("success_rate", 0) * 100
                 mr = metrics.get("mean_reward", 0)
                 n = metrics.get("count", 0)
-                print(f"  {diff:8s}: {sr:5.1f}% success, {mr:.3f} reward ({n} episodes)")
+                print(f"  {level:3d}: {sr:5.1f}% success, {mr:.3f} reward ({n} episodes)")
 
         if self.metrics_by_domain:
             print("\nBy Domain:")
@@ -121,7 +121,7 @@ class EvaluationResult:
 
 
 class Evaluator:
-    """Runs evaluation with per-difficulty/domain metrics."""
+    """Runs evaluation with per-level/domain metrics."""
 
     def __init__(
         self,
@@ -134,13 +134,13 @@ class Evaluator:
         self.save_trajectories = save_trajectories
 
         # Index tasks
-        self._by_difficulty: dict[str, list["SearchTask"]] = {}
+        self._by_level: dict[int, list["SearchTask"]] = {}
         self._by_domain: dict[str, list["SearchTask"]] = {}
 
         for task in tasks:
-            if task.difficulty not in self._by_difficulty:
-                self._by_difficulty[task.difficulty] = []
-            self._by_difficulty[task.difficulty].append(task)
+            if task.level not in self._by_level:
+                self._by_level[task.level] = []
+            self._by_level[task.level].append(task)
 
             if task.domain not in self._by_domain:
                 self._by_domain[task.domain] = []
@@ -165,7 +165,7 @@ class Evaluator:
         """
         result = {
             "task_id": task.task_id,
-            "difficulty": task.difficulty,
+            "level": task.level,
             "domain": task.domain,
             "success": final_metrics.success,
             "total_reward": final_metrics.total_reward,
@@ -214,17 +214,17 @@ class Evaluator:
         mean_reward = sum(rewards) / len(rewards)
         std_reward = (sum((r - mean_reward) ** 2 for r in rewards) / len(rewards)) ** 0.5
 
-        # By difficulty
-        by_difficulty: dict[str, dict[str, float]] = {}
-        for diff in self._by_difficulty.keys():
-            diff_episodes = [e for e in episode_results if e["difficulty"] == diff]
-            if diff_episodes:
-                diff_rewards = [e["total_reward"] for e in diff_episodes]
-                by_difficulty[diff] = {
-                    "count": len(diff_episodes),
-                    "success_rate": sum(1 for e in diff_episodes if e["success"]) / len(diff_episodes),
-                    "mean_reward": sum(diff_rewards) / len(diff_rewards),
-                    "mean_f_beta": sum(e["f_beta"] for e in diff_episodes) / len(diff_episodes),
+        # By level
+        by_level: dict[int, dict[str, float]] = {}
+        for level in self._by_level.keys():
+            level_episodes = [e for e in episode_results if e["level"] == level]
+            if level_episodes:
+                level_rewards = [e["total_reward"] for e in level_episodes]
+                by_level[level] = {
+                    "count": len(level_episodes),
+                    "success_rate": sum(1 for e in level_episodes if e["success"]) / len(level_episodes),
+                    "mean_reward": sum(level_rewards) / len(level_rewards),
+                    "mean_f_beta": sum(e["f_beta"] for e in level_episodes) / len(level_episodes),
                 }
 
         # By domain
@@ -244,20 +244,20 @@ class Evaluator:
             successful_episodes=sum(1 for e in episode_results if e["success"]),
             mean_reward=mean_reward,
             std_reward=std_reward,
-            metrics_by_difficulty=by_difficulty,
+            metrics_by_level=by_level,
             metrics_by_domain=by_domain,
             episode_results=episode_results if self.save_trajectories else [],
             model_name=model_name,
             eval_timestamp=datetime.datetime.now().isoformat(),
         )
 
-    def get_tasks_by_difficulty(
+    def get_tasks_by_level(
         self,
-        difficulty: str,
+        level: int,
         n: int | None = None,
     ) -> list["SearchTask"]:
-        """Get tasks of a specific difficulty."""
-        tasks = self._by_difficulty.get(difficulty, [])
+        """Get tasks of a specific level."""
+        tasks = self._by_level.get(level, [])
         if n is not None:
             return tasks[:n]
         return tasks

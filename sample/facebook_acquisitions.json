@@ -1,0 +1,67 @@
+{
+  "seed": "facebook_acquisitions",
+  "domain": "tech",
+  "tasks": [
+    {
+      "task_id": "sample_tech_facebook_acquisitions_001",
+      "level": 2,
+      "domain": "tech",
+      "clues": "A tech company made three major acquisitions: a photo app for $1 billion in 2012, a messaging app for $19 billion in 2014, and a VR company for $2 billion also in 2014.",
+      "question": "What is the total amount spent on these three acquisitions in billions of dollars?",
+      "truth": "22",
+      "truth_type": "number",
+      "supporting_items": [
+        {
+          "id": "chunk_instagram_001",
+          "reasoning": "Contains Instagram acquisition price ($1B)",
+          "clue_quotes": ["photo app", "$1 billion", "2012"],
+          "item_quotes": ["Instagram", "$1 billion", "2012"],
+          "truth_quotes": [],
+          "contains_truth": false,
+          "not_relevant": false
+        },
+        {
+          "id": "chunk_whatsapp_001",
+          "reasoning": "Contains WhatsApp acquisition price ($19B)",
+          "clue_quotes": ["messaging app", "$19 billion", "2014"],
+          "item_quotes": ["WhatsApp", "$19 billion", "2014"],
+          "truth_quotes": [],
+          "contains_truth": false,
+          "not_relevant": false
+        },
+        {
+          "id": "chunk_oculus_001",
+          "reasoning": "Contains Oculus acquisition price ($2B)",
+          "clue_quotes": ["VR company", "$2 billion", "2014"],
+          "item_quotes": ["Oculus", "$2 billion", "2014", "virtual reality"],
+          "truth_quotes": [],
+          "contains_truth": false,
+          "not_relevant": false
+        }
+      ],
+      "items_and_contents": {
+        "chunk_instagram_001": "Instagram launched in October 2010 as a photo-sharing app created by Kevin Systrom and Mike Krieger. The app gained rapid popularity and was acquired by Facebook in April 2012 for approximately $1 billion in cash and stock.",
+        "chunk_whatsapp_001": "WhatsApp is a messaging application co-founded by Jan Koum and Brian Acton. Jan Koum was born in Kyiv, Ukraine and emigrated to the United States at age 16. WhatsApp was acquired by Facebook in 2014 for $19 billion, making it one of the largest tech acquisitions in history.",
+        "chunk_oculus_001": "Oculus VR is a virtual reality technology company founded by Palmer Luckey. It was acquired by Facebook in March 2014 for $2 billion, marking Facebook's major entry into the VR hardware space."
+      },
+      "valid_distractors": [
+        {
+          "id": "chunk_twitter_001",
+          "reasoning": "Another major tech acquisition but by different company",
+          "contains_truth": false
+        },
+        {
+          "id": "chunk_linkedin_001",
+          "reasoning": "Another large tech acquisition for comparison",
+          "contains_truth": false
+        }
+      ],
+      "distractors_and_contents": {
+        "chunk_twitter_001": "Elon Musk completed the acquisition of Twitter in October 2022 for $44 billion, taking the social media company private after a months-long negotiation process.",
+        "chunk_linkedin_001": "Microsoft acquired LinkedIn in 2016 for $26.2 billion, making it one of the largest acquisitions in tech history at that time."
+      },
+      "passed_verification": true,
+      "extraction_retry_count": 0
+    }
+  ]
+}

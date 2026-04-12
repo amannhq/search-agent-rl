@@ -1,0 +1,61 @@
+{
+  "seed": "berlin_wall",
+  "domain": "history",
+  "tasks": [
+    {
+      "task_id": "sample_history_berlin_wall_001",
+      "level": 0,
+      "domain": "history",
+      "clues": "A wall that divided a major European city fell in November 1989. It had been standing for 28 years.",
+      "question": "In what month and year was this wall originally constructed?",
+      "truth": "August 1961",
+      "truth_type": "date",
+      "supporting_items": [
+        {
+          "id": "chunk_berlin_wall_001",
+          "reasoning": "Contains Berlin Wall construction and fall dates",
+          "clue_quotes": ["wall", "divided", "European city", "November 1989", "28 years"],
+          "item_quotes": ["Berlin Wall", "August 1961", "November 1989", "East Berlin", "West Berlin"],
+          "truth_quotes": ["constructed in August 1961"],
+          "contains_truth": true,
+          "not_relevant": false
+        },
+        {
+          "id": "chunk_berlin_wall_002",
+          "reasoning": "Historical context about the division",
+          "clue_quotes": ["divided", "wall"],
+          "item_quotes": ["Cold War", "Germany", "division"],
+          "truth_quotes": [],
+          "contains_truth": false,
+          "not_relevant": false
+        },
+        {
+          "id": "chunk_berlin_001",
+          "reasoning": "Information about the city itself",
+          "clue_quotes": ["European city"],
+          "item_quotes": ["Berlin", "capital", "Germany"],
+          "truth_quotes": [],
+          "contains_truth": false,
+          "not_relevant": false
+        }
+      ],
+      "items_and_contents": {
+        "chunk_berlin_wall_001": "The Berlin Wall was constructed in August 1961 by the German Democratic Republic (East Germany). It stood for 28 years until it fell on November 9, 1989, becoming a pivotal moment in the end of the Cold War.",
+        "chunk_berlin_wall_002": "The Berlin Wall represented the physical division between East and West during the Cold War. Families were separated, and many died attempting to cross from East to West Berlin.",
+        "chunk_berlin_001": "Berlin is the capital and largest city of Germany. After World War II, the city was divided into four sectors controlled by the Allied powers."
+      },
+      "valid_distractors": [
+        {
+          "id": "chunk_wwii_001",
+          "reasoning": "Related historical period but different event",
+          "contains_truth": false
+        }
+      ],
+      "distractors_and_contents": {
+        "chunk_wwii_001": "World War II in Europe ended on May 8, 1945, with Germany's unconditional surrender. This date is commemorated as Victory in Europe Day (V-E Day)."
+      },
+      "passed_verification": true,
+      "extraction_retry_count": 0
+    }
+  ]
+}

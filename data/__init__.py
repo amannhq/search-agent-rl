@@ -1,12 +1,32 @@
-"""Task and corpus data for the Search RL Environment.
+"""Task data loading for the Search RL Environment.
 
-Static data:
-    - get_documents(): Load corpus documents
-    - get_all_tasks(): Load all tasks
-    - get_tasks_by_difficulty(): Filter by difficulty
+Production data (from generators):
+    - load_tasks_from_directory(path): Load per-seed task files from output/
+    - load_verified_tasks(path): Load only tasks with passed_verification=True
+    - load_tasks_by_level(path, level): Load tasks of a specific level
 
 Data generation (requires datagen extra):
     python -m data.generator.domains.web --seeds seeds.txt --output ./output
+    python -m data.generator.domains.sec --tickers tickers.txt --output ./output
+
+Production file structure:
+    output/
+    ├── {seed}.json          # Web: one file per seed (e.g., machine_learning.json)
+    ├── {TICKER}.json        # SEC: one file per ticker (e.g., AAPL.json)
+    └── {number}.json        # Epstein: numbered files (0.json, 1.json, ...)
+
+Each file contains:
+    {
+        "seed": "topic_name",
+        "domain": "web|sec|epstein",
+        "tasks": [
+            {"level": 0, "truth": "...", "supporting_items": [...], ...},
+            {"level": 1, ...},  // extension tasks
+        ]
+    }
+
+For sample/mock data during development, use the sample module:
+    from sample import get_sample_tasks, get_sample_tasks_by_level
 """
 
 from __future__ import annotations
@@ -21,123 +41,181 @@ except ImportError:
     from models import SearchTask
 
 
-_DATA_DIR = Path(__file__).parent
-_CORPUS_FILE = _DATA_DIR / "corpus.json"
-_TASKS_FILE = _DATA_DIR / "tasks.json"
-
-_cached_documents: list[dict[str, Any]] | None = None
-_cached_tasks: list[SearchTask] | None = None
-
-
 def _load_json(file_path: Path) -> dict[str, Any]:
     with open(file_path, "r", encoding="utf-8") as f:
         return json.load(f)
 
 
-def _save_json(file_path: Path, data: dict[str, Any]) -> None:
-    with open(file_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+def load_tasks_from_directory(
+    directory: str | Path,
+    verified_only: bool = True,
+    min_level: int | None = None,
+    max_level: int | None = None,
+) -> list[SearchTask]:
+    """
+    Load tasks from a directory of per-seed JSON files (production format).
+
+    This is the format produced by the data generators:
+    - Web domain: {seed}.json (e.g., machine_learning.json)
+    - SEC domain: {TICKER}.json (e.g., AAPL.json)
+    - Epstein domain: {number}.json (e.g., 0.json, 1.json)
+
+    Each file contains a "tasks" array with level 0, 1, 2, etc.
+
+    Args:
+        directory: Path to the output directory containing task JSON files
+        verified_only: Only include tasks with passed_verification=True
+        min_level: Minimum task level to include (None = no minimum)
+        max_level: Maximum task level to include (None = no maximum)
+
+    Returns:
+        List of SearchTask objects from all files in the directory
+    """
+    directory = Path(directory)
+    if not directory.exists():
+        raise FileNotFoundError(f"Directory not found: {directory}")
+
+    all_tasks: list[SearchTask] = []
+    task_files = list(directory.glob("*.json"))
+
+    # Exclude index output files
+    task_files = [f for f in task_files if not f.name.startswith("index_")]
+
+    for task_file in task_files:
+        try:
+            data = _load_json(task_file)
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"Warning: Skipping {task_file}: {e}")
+            continue
+
+        tasks_data = data.get("tasks", [])
+        if not tasks_data:
+            continue
+
+        for task_data in tasks_data:
+            # Filter by verification status
+            if verified_only and not task_data.get("passed_verification", False):
+                continue
+
+            # Filter by level
+            level = task_data.get("level", 0)
+            if min_level is not None and level < min_level:
+                continue
+            if max_level is not None and level > max_level:
+                continue
+
+            # Generate task_id if not present
+            if "task_id" not in task_data:
+                task_data["task_id"] = f"{task_file.stem}_level_{level}"
+
+            # Add source file info
+            task_data.setdefault("domain", _infer_domain(task_file, data))
+
+            try:
+                task = SearchTask(**task_data)
+                all_tasks.append(task)
+            except Exception as e:
+                print(f"Warning: Skipping invalid task in {task_file}: {e}")
+                continue
+
+    return all_tasks
 
 
-def _invalidate_cache() -> None:
-    global _cached_documents, _cached_tasks
-    _cached_documents = None
-    _cached_tasks = None
+def load_verified_tasks(directory: str | Path) -> list[SearchTask]:
+    """
+    Load only verified tasks from a production output directory.
+
+    Shorthand for load_tasks_from_directory(directory, verified_only=True).
+    """
+    return load_tasks_from_directory(directory, verified_only=True)
 
 
-def get_documents() -> list[dict[str, Any]]:
-    """Load documents from corpus.json (cached after first call)."""
-    global _cached_documents
-    if _cached_documents is not None:
-        return list(_cached_documents)
-    result: list[dict[str, Any]] = _load_json(_CORPUS_FILE).get("documents", [])
-    _cached_documents = result
-    return list(result)
+def load_tasks_by_level(
+    directory: str | Path,
+    level: int,
+    verified_only: bool = True,
+) -> list[SearchTask]:
+    """Load tasks of a specific level from a production output directory."""
+    return load_tasks_from_directory(
+        directory,
+        verified_only=verified_only,
+        min_level=level,
+        max_level=level,
+    )
 
 
-def get_all_tasks() -> list[SearchTask]:
-    """Load all tasks from tasks.json (cached after first call)."""
-    global _cached_tasks
-    if _cached_tasks is not None:
-        return list(_cached_tasks)
-    result = [SearchTask(**t) for t in _load_json(_TASKS_FILE).get("tasks", [])]
-    _cached_tasks = result
-    return list(result)
+def get_directory_statistics(directory: str | Path) -> dict[str, Any]:
+    """
+    Get statistics about tasks in a production output directory.
 
+    Returns:
+        Dictionary with counts by level, domain, verification status, etc.
+    """
+    directory = Path(directory)
+    if not directory.exists():
+        return {"error": f"Directory not found: {directory}"}
 
-def get_tasks_by_difficulty(difficulty: str) -> list[SearchTask]:
-    """Get tasks filtered by difficulty (easy, medium, hard)."""
-    if difficulty not in ("easy", "medium", "hard"):
-        raise ValueError(f"Unknown difficulty: {difficulty}")
-    return [t for t in get_all_tasks() if t.difficulty == difficulty]
-
-
-def get_tasks_by_domain(domain: str) -> list[SearchTask]:
-    """Get tasks filtered by domain."""
-    return [t for t in get_all_tasks() if t.domain == domain]
-
-
-def get_task_by_id(task_id: str) -> SearchTask | None:
-    """Get a specific task by ID."""
-    for task in get_all_tasks():
-        if task.task_id == task_id:
-            return task
-    return None
-
-
-def get_task_statistics() -> dict[str, Any]:
-    """Get statistics about tasks and corpus."""
-    all_tasks = get_all_tasks()
-    documents = get_documents()
-
-    difficulties = {"easy": 0, "medium": 0, "hard": 0}
-    for task in all_tasks:
-        if task.difficulty in difficulties:
-            difficulties[task.difficulty] += 1
-
-    return {
-        "total_tasks": len(all_tasks),
-        "by_difficulty": difficulties,
-        "domains": list(set(t.domain for t in all_tasks)),
-        "num_documents": len(documents),
+    stats: dict[str, Any] = {
+        "total_files": 0,
+        "total_tasks": 0,
+        "verified_tasks": 0,
+        "unverified_tasks": 0,
+        "by_level": {},
+        "by_domain": {},
+        "files_with_errors": [],
     }
 
+    task_files = [f for f in directory.glob("*.json") if not f.name.startswith("index_")]
+    stats["total_files"] = len(task_files)
 
-def add_task(task: SearchTask) -> None:
-    """Add a new task to tasks.json."""
-    data = _load_json(_TASKS_FILE)
-    data["tasks"].append(task.model_dump())
-    _save_json(_TASKS_FILE, data)
-    _invalidate_cache()
+    for task_file in task_files:
+        try:
+            data = _load_json(task_file)
+        except Exception as e:
+            stats["files_with_errors"].append({"file": str(task_file), "error": str(e)})
+            continue
 
+        for task_data in data.get("tasks", []):
+            stats["total_tasks"] += 1
 
-def add_document(doc: dict[str, Any]) -> None:
-    """Add a new document to corpus.json."""
-    data = _load_json(_CORPUS_FILE)
-    data["documents"].append(doc)
-    _save_json(_CORPUS_FILE, data)
-    _invalidate_cache()
+            if task_data.get("passed_verification", False):
+                stats["verified_tasks"] += 1
+            else:
+                stats["unverified_tasks"] += 1
 
+            level = task_data.get("level", 0)
+            stats["by_level"][level] = stats["by_level"].get(level, 0) + 1
 
-def remove_task(task_id: str) -> bool:
-    """Remove a task by ID. Returns True if removed."""
-    data = _load_json(_TASKS_FILE)
-    original = data["tasks"]
-    data["tasks"] = [t for t in original if t.get("task_id") != task_id]
-    if len(data["tasks"]) < len(original):
-        _save_json(_TASKS_FILE, data)
-        _invalidate_cache()
-        return True
-    return False
+            domain = task_data.get("domain", _infer_domain(task_file, data))
+            stats["by_domain"][domain] = stats["by_domain"].get(domain, 0) + 1
+
+    return stats
 
 
-def remove_document(doc_id: str) -> bool:
-    """Remove a document by ID. Returns True if removed."""
-    data = _load_json(_CORPUS_FILE)
-    original = data["documents"]
-    data["documents"] = [d for d in original if d.get("doc_id") != doc_id]
-    if len(data["documents"]) < len(original):
-        _save_json(_CORPUS_FILE, data)
-        _invalidate_cache()
-        return True
-    return False
+def _infer_domain(task_file: Path, data: dict[str, Any]) -> str:
+    """Infer the domain from file content or naming patterns."""
+    # Check if domain is explicitly set
+    if "domain" in data:
+        return data["domain"]
+
+    # SEC domain has ticker field
+    if "ticker" in data:
+        return "sec"
+
+    # Check for URL-based IDs (web domain)
+    for task in data.get("tasks", []):
+        for item in task.get("supporting_items", []):
+            item_id = item.get("id", "")
+            if item_id.startswith("http://") or item_id.startswith("https://"):
+                return "web"
+            if item_id.startswith("thread_") or "_" in item_id and item_id.split("_")[0].isdigit():
+                return "epstein"
+
+    # Fallback based on filename pattern
+    name = task_file.stem
+    if name.isupper() and len(name) <= 5:  # Looks like a ticker
+        return "sec"
+    if name.isdigit():  # Numbered file
+        return "epstein"
+
+    return "web"  # Default to web domain

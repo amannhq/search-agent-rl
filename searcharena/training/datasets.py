@@ -60,15 +60,15 @@ class TaskSampler:
         self.tasks = tasks
         self.rng = random.Random(seed)
 
-        # Index by difficulty and domain
-        self._by_difficulty: dict[str, list["SearchTask"]] = {}
+        # Index by level and domain
+        self._by_level: dict[int, list["SearchTask"]] = {}
         self._by_domain: dict[str, list["SearchTask"]] = {}
 
         for task in tasks:
-            diff = task.difficulty
-            if diff not in self._by_difficulty:
-                self._by_difficulty[diff] = []
-            self._by_difficulty[diff].append(task)
+            level = task.level
+            if level not in self._by_level:
+                self._by_level[level] = []
+            self._by_level[level].append(task)
 
             domain = task.domain
             if domain not in self._by_domain:
@@ -79,25 +79,25 @@ class TaskSampler:
         """Sample n tasks uniformly."""
         return self.rng.choices(self.tasks, k=n)
 
-    def sample_by_difficulty(
+    def sample_by_level(
         self,
         n: int = 1,
-        weights: dict[str, float] | None = None,
+        weights: dict[int, float] | None = None,
     ) -> list["SearchTask"]:
         """
-        Sample tasks with difficulty-based weights.
+        Sample tasks with level-based weights.
 
         Args:
             n: Number of tasks to sample
-            weights: Difficulty -> weight mapping (e.g., {"easy": 0.5, "medium": 0.3, "hard": 0.2})
+            weights: Level -> weight mapping (e.g., {0: 0.5, 1: 0.3, 2: 0.2})
         """
         if weights is None:
-            weights = {"easy": 1.0, "medium": 1.0, "hard": 1.0}
+            weights = {0: 1.0, 1: 1.0, 2: 1.0}
 
         # Build weighted task list
         weighted_tasks: list[tuple["SearchTask", float]] = []
         for task in self.tasks:
-            w = weights.get(task.difficulty, 1.0)
+            w = weights.get(task.level, 1.0)
             weighted_tasks.append((task, w))
 
         tasks, task_weights = zip(*weighted_tasks)
@@ -105,27 +105,27 @@ class TaskSampler:
 
     def sample_stratified(
         self,
-        n_per_difficulty: int = 1,
-        difficulties: list[str] | None = None,
+        n_per_level: int = 1,
+        levels: list[int] | None = None,
     ) -> list["SearchTask"]:
-        """Sample equal numbers from each difficulty."""
-        difficulties = difficulties or list(self._by_difficulty.keys())
+        """Sample equal numbers from each level."""
+        levels = levels or list(self._by_level.keys())
 
         sampled = []
-        for diff in difficulties:
-            if diff in self._by_difficulty:
-                pool = self._by_difficulty[diff]
-                sampled.extend(self.rng.choices(pool, k=min(n_per_difficulty, len(pool))))
+        for level in levels:
+            if level in self._by_level:
+                pool = self._by_level[level]
+                sampled.extend(self.rng.choices(pool, k=min(n_per_level, len(pool))))
 
         return sampled
 
-    def sample_from_difficulty(
+    def sample_from_level(
         self,
-        difficulty: str,
+        level: int,
         n: int = 1,
     ) -> list["SearchTask"]:
-        """Sample tasks from a specific difficulty."""
-        pool = self._by_difficulty.get(difficulty, [])
+        """Sample tasks from a specific level."""
+        pool = self._by_level.get(level, [])
         if not pool:
             return []
         return self.rng.choices(pool, k=min(n, len(pool)))
@@ -142,9 +142,9 @@ class TaskSampler:
         return self.rng.choices(pool, k=min(n, len(pool)))
 
     @property
-    def difficulties(self) -> list[str]:
-        """Get available difficulties."""
-        return list(self._by_difficulty.keys())
+    def levels(self) -> list[int]:
+        """Get available levels."""
+        return list(self._by_level.keys())
 
     @property
     def domains(self) -> list[str]:

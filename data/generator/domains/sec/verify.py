@@ -642,7 +642,7 @@ def build_failure_reasons(
     quotes_verified: bool,
     truth_contained: bool,
     verification_results: List[Dict[str, bool]],
-    bridging_verification: Dict[str, bool] = None,
+    bridging_verification: Dict[str, bool] | None = None,
     has_not_relevant_items: bool = False,
     has_bridging_not_relevant: bool = False
 ) -> List[str]:
@@ -764,7 +764,7 @@ def verify_bridging_item(
     clues: str,
     items_and_contents: Dict[str, str],
     prev_clues: str = "",
-    prev_items_and_contents: Dict[str, str] = None
+    prev_items_and_contents: Dict[str, str] | None = None
 ) -> Dict[str, bool]:
     """Verify quotes for a bridging item (no truth check).
 
@@ -829,7 +829,7 @@ def verify_extension_items(
     clues: str,
     items_and_contents: Dict[str, str],
     prev_clues: str = "",
-    prev_items_and_contents: Dict[str, str] = None
+    prev_items_and_contents: Dict[str, str] | None = None
 ) -> Tuple[bool, Dict[str, bool], List[Dict[str, bool]]]:
     """
     Verify bridging_item and supporting_items for an extension task.

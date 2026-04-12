@@ -1,0 +1,66 @@
+{
+  "seed": "whatsapp",
+  "domain": "tech",
+  "tasks": [
+    {
+      "task_id": "sample_tech_whatsapp_001",
+      "level": 1,
+      "domain": "tech",
+      "clues": "A social media giant acquired a photo-sharing app for around $1 billion and later acquired a messaging service for a much larger sum. The messaging service was co-founded by an immigrant from Eastern Europe.",
+      "question": "How many billions of dollars did the messaging service acquisition cost?",
+      "truth": "19",
+      "truth_type": "number",
+      "supporting_items": [
+        {
+          "id": "chunk_whatsapp_001",
+          "reasoning": "Contains WhatsApp acquisition price and founder background",
+          "clue_quotes": ["messaging service", "acquisition", "co-founded", "Eastern Europe"],
+          "item_quotes": ["WhatsApp", "Jan Koum", "Ukraine", "$19 billion", "Facebook"],
+          "truth_quotes": ["$19 billion"],
+          "contains_truth": true,
+          "not_relevant": false
+        },
+        {
+          "id": "chunk_instagram_001",
+          "reasoning": "Links to the photo-sharing app acquisition mentioned in clues",
+          "clue_quotes": ["photo-sharing app", "$1 billion", "social media"],
+          "item_quotes": ["Instagram", "Facebook", "$1 billion"],
+          "truth_quotes": [],
+          "contains_truth": false,
+          "not_relevant": false
+        }
+      ],
+      "items_and_contents": {
+        "chunk_whatsapp_001": "WhatsApp is a messaging application co-founded by Jan Koum and Brian Acton. Jan Koum was born in Kyiv, Ukraine and emigrated to the United States at age 16. WhatsApp was acquired by Facebook in 2014 for $19 billion, making it one of the largest tech acquisitions in history.",
+        "chunk_instagram_001": "Instagram launched in October 2010 as a photo-sharing app created by Kevin Systrom and Mike Krieger. The app gained rapid popularity and was acquired by Facebook in April 2012 for approximately $1 billion in cash and stock."
+      },
+      "bridging_item": {
+        "id": "chunk_facebook_001",
+        "relevant_prev_id": "chunk_instagram_001",
+        "reasoning": "Bridges the Instagram acquisition to the WhatsApp acquisition through Facebook",
+        "clue_quotes": ["social media giant", "acquired"],
+        "item_quotes": ["Facebook", "acquisitions"],
+        "not_relevant": false,
+        "prev_item": {
+          "relevant_prev_id": "chunk_instagram_001",
+          "clue_quotes": ["photo-sharing app", "acquired"],
+          "prev_item_quotes": ["Instagram", "Facebook"],
+          "reasoning": "Previous level task about Instagram acquisition",
+          "not_relevant": false
+        }
+      },
+      "valid_distractors": [
+        {
+          "id": "chunk_telegram_001",
+          "reasoning": "Another messaging app that could be confused",
+          "contains_truth": false
+        }
+      ],
+      "distractors_and_contents": {
+        "chunk_telegram_001": "Telegram was founded by Pavel Durov in 2013. The messaging app emphasizes privacy and security with features like end-to-end encryption for secret chats."
+      },
+      "passed_verification": true,
+      "extraction_retry_count": 1
+    }
+  ]
+}

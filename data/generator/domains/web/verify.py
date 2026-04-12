@@ -48,11 +48,11 @@ class WebVerifier(BaseVerifier):
         self,
         quotes_verified: bool,
         truth_contained: bool,
-        verification_results: List[Dict[str, bool]] = None,
-        bridging_verification: Dict[str, bool] = None,
+        verification_results: List[Dict[str, bool]] | None = None,
+        bridging_verification: Dict[str, bool] | None = None,
         has_not_relevant_items: bool = False,
         has_bridging_not_relevant: bool = False,
-        custom_reason: str = None
+        custom_reason: str | None = None
     ) -> List[str]:
         """Build a list of reasons explaining why verification failed."""
         reasons = []
@@ -262,7 +262,7 @@ class WebVerifier(BaseVerifier):
         clues: str,
         items_and_contents: Dict[str, str],
         prev_clues: str = "",
-        prev_items_and_contents: Dict[str, str] = None
+        prev_items_and_contents: Dict[str, str] | None = None
     ) -> Dict[str, bool]:
         """Verify quotes for a bridging item (no truth check)."""
         if prev_items_and_contents is None:
@@ -411,7 +411,7 @@ class WebVerifier(BaseVerifier):
         clues: str,
         items_and_contents: Dict[str, str],
         prev_clues: str = "",
-        prev_items_and_contents: Dict[str, str] = None
+        prev_items_and_contents: Dict[str, str] | None = None
     ) -> Tuple[bool, Dict[str, bool], List[Dict[str, bool]]]:
         """Verify bridging_item and supporting_items for an extension task."""
         if prev_items_and_contents is None:

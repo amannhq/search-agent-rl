@@ -1,0 +1,61 @@
+{
+  "seed": "curie",
+  "domain": "science",
+  "tasks": [
+    {
+      "task_id": "sample_science_curie_001",
+      "level": 0,
+      "domain": "science",
+      "clues": "A scientist who discovered two radioactive elements (one named after her home country) won Nobel Prizes in two different scientific fields.",
+      "question": "In what year did she win her second Nobel Prize?",
+      "truth": "1911",
+      "truth_type": "date",
+      "supporting_items": [
+        {
+          "id": "chunk_curie_001",
+          "reasoning": "Contains Marie Curie's Nobel Prize information and element discoveries",
+          "clue_quotes": ["scientist", "two radioactive elements", "home country", "Nobel Prizes", "two different"],
+          "item_quotes": ["Marie Curie", "polonium", "Poland", "radium", "Nobel Prize", "Physics", "Chemistry", "1911"],
+          "truth_quotes": ["Chemistry in 1911"],
+          "contains_truth": true,
+          "not_relevant": false
+        },
+        {
+          "id": "chunk_curie_002",
+          "reasoning": "Additional context about her research",
+          "clue_quotes": ["radioactive elements", "discovered"],
+          "item_quotes": ["radioactivity", "Pierre Curie", "research"],
+          "truth_quotes": [],
+          "contains_truth": false,
+          "not_relevant": false
+        },
+        {
+          "id": "chunk_curie_003",
+          "reasoning": "Her background and early life",
+          "clue_quotes": ["home country"],
+          "item_quotes": ["Warsaw", "Poland", "moved to France"],
+          "truth_quotes": [],
+          "contains_truth": false,
+          "not_relevant": false
+        }
+      ],
+      "items_and_contents": {
+        "chunk_curie_001": "Marie Curie won the Nobel Prize in Physics in 1903 (shared with Pierre Curie and Henri Becquerel) and the Nobel Prize in Chemistry in 1911. She became the first person to win Nobel Prizes in two different sciences.",
+        "chunk_curie_002": "Marie Curie's research on radioactivity led to the discovery of polonium and radium. She worked closely with her husband Pierre Curie, conducting groundbreaking experiments on radioactive materials.",
+        "chunk_curie_003": "Marie Curie was born Maria Sklodowska in Warsaw, Poland in 1867. She moved to Paris in 1891 to study at the Sorbonne, where she later met Pierre Curie."
+      },
+      "valid_distractors": [
+        {
+          "id": "chunk_einstein_001",
+          "reasoning": "Another famous physicist and Nobel laureate",
+          "contains_truth": false
+        }
+      ],
+      "distractors_and_contents": {
+        "chunk_einstein_001": "Albert Einstein won the Nobel Prize in Physics in 1921 for his discovery of the photoelectric effect, not for his more famous theory of relativity."
+      },
+      "passed_verification": true,
+      "extraction_retry_count": 0
+    }
+  ]
+}

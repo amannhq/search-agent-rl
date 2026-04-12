@@ -1,0 +1,67 @@
+{
+  "seed": "instagram",
+  "domain": "tech",
+  "tasks": [
+    {
+      "task_id": "sample_tech_instagram_001",
+      "level": 0,
+      "domain": "tech",
+      "clues": "A photo-sharing application was acquired by a major social network in April 2012 for approximately one billion dollars.",
+      "question": "In what year was this photo-sharing application originally launched?",
+      "truth": "2010",
+      "truth_type": "date",
+      "supporting_items": [
+        {
+          "id": "chunk_instagram_001",
+          "reasoning": "Contains information about Instagram's launch date and acquisition",
+          "clue_quotes": ["photo-sharing application", "acquired", "April 2012", "one billion dollars"],
+          "item_quotes": ["Instagram launched in October 2010", "photo-sharing app", "acquired by Facebook"],
+          "truth_quotes": ["launched in October 2010"],
+          "contains_truth": true,
+          "not_relevant": false
+        },
+        {
+          "id": "chunk_instagram_002",
+          "reasoning": "Provides additional context about the company's early history",
+          "clue_quotes": ["photo-sharing", "2012"],
+          "item_quotes": ["Kevin Systrom", "Mike Krieger", "photo filters"],
+          "truth_quotes": [],
+          "contains_truth": false,
+          "not_relevant": false
+        },
+        {
+          "id": "chunk_facebook_001",
+          "reasoning": "Information about the acquiring company",
+          "clue_quotes": ["major social network", "acquired"],
+          "item_quotes": ["Facebook", "acquisitions", "Mark Zuckerberg"],
+          "truth_quotes": [],
+          "contains_truth": false,
+          "not_relevant": false
+        }
+      ],
+      "items_and_contents": {
+        "chunk_instagram_001": "Instagram launched in October 2010 as a photo-sharing app created by Kevin Systrom and Mike Krieger. The app gained rapid popularity and was acquired by Facebook in April 2012 for approximately $1 billion in cash and stock.",
+        "chunk_instagram_002": "Kevin Systrom and Mike Krieger developed Instagram while working on a location-based project called Burbn. They pivoted to focus solely on photo sharing with filters, launching the simplified app that became Instagram.",
+        "chunk_facebook_001": "Facebook, founded by Mark Zuckerberg in 2004, has made numerous acquisitions including Instagram ($1B in 2012), WhatsApp ($19B in 2014), and Oculus VR ($2B in 2014)."
+      },
+      "valid_distractors": [
+        {
+          "id": "chunk_snapchat_001",
+          "reasoning": "Another photo-sharing app that could be confused with Instagram",
+          "contains_truth": false
+        },
+        {
+          "id": "chunk_pinterest_001",
+          "reasoning": "Visual social platform that shares some characteristics",
+          "contains_truth": false
+        }
+      ],
+      "distractors_and_contents": {
+        "chunk_snapchat_001": "Snapchat was launched in 2011 by Evan Spiegel, Bobby Murphy, and Reggie Brown. The app introduced disappearing messages and later became known for Stories and AR filters.",
+        "chunk_pinterest_001": "Pinterest launched in 2010 as a visual discovery and bookmarking platform. Users create and share collections of visual bookmarks called pins organized into boards."
+      },
+      "passed_verification": true,
+      "extraction_retry_count": 0
+    }
+  ]
+}

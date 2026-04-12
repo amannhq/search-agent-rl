@@ -182,28 +182,62 @@ class SearchObservation(Observation):
     )
 
 
+class SupportingItem(BaseModel):
+    """A supporting item from data generation."""
+
+    id: str = Field(..., description="Item/chunk identifier")
+    reasoning: str = Field(default="", description="Why this item supports the answer")
+
+    # Quote fields added by verification
+    clue_quotes: List[str] = Field(default_factory=list)
+    item_quotes: List[str] = Field(default_factory=list)
+    truth_quotes: List[str] = Field(default_factory=list)
+    contains_truth: bool = Field(default=False)
+    not_relevant: bool = Field(default=False)
+
+
+class DistractorItem(BaseModel):
+    """A distractor item that doesn't contain the truth."""
+
+    id: str = Field(..., description="Item/chunk identifier")
+    reasoning: str = Field(default="", description="Why this is a good distractor")
+    contains_truth: bool = Field(default=False)
+
+
 class SearchTask(BaseModel):
     """
     A single search task/episode.
 
-    Defines the question, gold answer, and supporting evidence.
+    Uses the same field names as data generator output for direct compatibility.
     """
 
-    task_id: str = Field(..., description="Unique task identifier")
+    # Core fields (matching generator output)
     question: str = Field(..., description="The multi-hop question to answer")
-    gold_answer: str = Field(..., description="Ground truth answer")
-    gold_chunk_ids: List[str] = Field(..., description="Chunk IDs containing evidence")
+    truth: str = Field(..., description="Ground truth answer")
+    clues: str = Field(default="", description="Clues text that hints at the answer")
+    supporting_items: List[SupportingItem] = Field(
+        default_factory=list, description="Items that support the answer"
+    )
+    items_and_contents: Dict[str, str] = Field(
+        default_factory=dict, description="Map of item IDs to their content"
+    )
+
+    # Distractor fields
+    valid_distractors: List[DistractorItem] = Field(
+        default_factory=list, description="Distractor items that don't contain truth"
+    )
+    distractors_and_contents: Dict[str, str] = Field(
+        default_factory=dict, description="Map of distractor IDs to content"
+    )
 
     # Task metadata
-    difficulty: str = Field(default="medium", description="easy, medium, hard")
-    num_hops: int = Field(default=1, description="Number of reasoning hops required")
+    task_id: str = Field(default="", description="Unique task identifier")
+    level: int = Field(default=0, description="Task level (0=base, 1+=extended)")
     domain: str = Field(default="general", description="Task domain")
+    truth_type: str = Field(default="", description="Type of truth")
 
-    # Optional
-    clues: List[str] = Field(default_factory=list, description="Intermediate clues")
-    distractor_chunk_ids: List[str] = Field(
-        default_factory=list, description="Hard negative chunk IDs"
-    )
+    # Verification fields
+    passed_verification: bool = Field(default=True, description="Whether task passed verification")
 
 
 class SearchEnvConfig(BaseModel):

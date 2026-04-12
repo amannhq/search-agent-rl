@@ -61,9 +61,12 @@ def empty_corpus() -> DocumentCorpus:
 @pytest.fixture
 def custom_task() -> SearchTask:
     """Create a custom task for testing."""
+    from searcharena.models import SupportingItem
     return SearchTask(
         task_id="custom_task",
         question="What is the meaning of life?",
-        gold_answer="42",
-        gold_chunk_ids=["doc_test_chunk_0"],
+        truth="42",
+        supporting_items=[SupportingItem(id="doc_test_chunk_0", reasoning="Contains the answer")],
+        items_and_contents={"doc_test_chunk_0": "The answer to life is 42."},
+        level=0,
     )

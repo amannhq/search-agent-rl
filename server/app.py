@@ -1,16 +1,16 @@
 """Server entrypoint for the search environment.
 
-This is a thin wrapper - all logic lives in the searcharena package.
+This provides a stateful HTTP server that maintains environment state
+between requests. For production use with multiple concurrent users,
+consider using WebSocket connections or separate environment instances per session.
 """
 
 import argparse
+from contextlib import asynccontextmanager
+from typing import Any
 
-try:
-    from openenv.core.env_server.http_server import create_app
-except Exception as e:  # pragma: no cover
-    raise ImportError(
-        "openenv is required for the web interface. Install dependencies with '\n    uv sync\n'"
-    ) from e
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 
 from searcharena import (
     SearchAction,
@@ -20,6 +20,36 @@ from searcharena import (
     create_sample_corpus,
     create_sample_tasks,
 )
+
+
+# Request/Response models
+class ResetRequest(BaseModel):
+    seed: int | None = None
+    task_id: str | None = None
+
+
+class ResetResponse(BaseModel):
+    observation: dict[str, Any]
+    reward: float
+    done: bool
+
+
+class StepRequest(BaseModel):
+    action: SearchAction
+
+
+class StepResponse(BaseModel):
+    observation: dict[str, Any]
+    reward: float
+    done: bool
+
+
+class HealthResponse(BaseModel):
+    status: str
+
+
+# Global environment instance
+_env: SearchEnvironment | None = None
 
 
 def create_environment() -> SearchEnvironment:
@@ -32,13 +62,103 @@ def create_environment() -> SearchEnvironment:
     )
 
 
-app = create_app(
-    create_environment,
-    SearchAction,
-    SearchObservation,
-    env_name="search_env",
-    max_concurrent_envs=4,
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize environment on startup."""
+    global _env
+    _env = create_environment()
+    yield
+    if _env:
+        _env.close()
+
+
+app = FastAPI(
+    title="Search RL Environment",
+    description="A stateful search environment for RL training",
+    lifespan=lifespan,
 )
+
+
+@app.get("/health", response_model=HealthResponse)
+async def health() -> HealthResponse:
+    """Health check endpoint."""
+    return HealthResponse(status="healthy")
+
+
+@app.get("/schema")
+async def schema() -> dict[str, Any]:
+    """Get action and observation schemas."""
+    return {
+        "action": SearchAction.model_json_schema(),
+        "observation": SearchObservation.model_json_schema(),
+    }
+
+
+@app.get("/state")
+async def state() -> dict[str, Any]:
+    """Get current environment state."""
+    if _env is None:
+        raise HTTPException(status_code=500, detail="Environment not initialized")
+    return _env.state.model_dump()
+
+
+@app.post("/reset", response_model=ResetResponse)
+async def reset(request: ResetRequest | None = None) -> ResetResponse:
+    """Reset the environment and get the first observation."""
+    global _env
+    if _env is None:
+        raise HTTPException(status_code=500, detail="Environment not initialized")
+
+    task_id = request.task_id if request else None
+    obs = _env.reset(task_id=task_id)
+
+    return ResetResponse(
+        observation=obs.model_dump(),
+        reward=0.0,
+        done=False,
+    )
+
+
+@app.post("/step", response_model=StepResponse)
+async def step(request: StepRequest) -> StepResponse:
+    """Execute an action and get the resulting observation."""
+    global _env
+    if _env is None:
+        raise HTTPException(status_code=500, detail="Environment not initialized")
+
+    obs = _env.step(request.action)
+
+    return StepResponse(
+        observation=obs.model_dump(),
+        reward=obs.reward if obs.reward is not None else 0.0,
+        done=obs.done,
+    )
+
+
+@app.get("/metadata")
+async def metadata() -> dict[str, Any]:
+    """Get environment metadata."""
+    if _env is None:
+        raise HTTPException(status_code=500, detail="Environment not initialized")
+    return _env.get_metadata().model_dump()
+
+
+@app.get("/tasks")
+async def list_tasks() -> dict[str, Any]:
+    """List available tasks."""
+    if _env is None:
+        raise HTTPException(status_code=500, detail="Environment not initialized")
+    return {
+        "tasks": [
+            {
+                "task_id": t.task_id,
+                "level": t.level,
+                "domain": t.domain,
+                "question": t.question,
+            }
+            for t in _env.tasks
+        ]
+    }
 
 
 def main() -> None:

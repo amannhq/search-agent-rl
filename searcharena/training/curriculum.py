@@ -13,26 +13,26 @@ if TYPE_CHECKING:
 class DifficultyLevel(IntEnum):
     """Difficulty levels for curriculum learning."""
 
-    EASY = 0
-    MEDIUM = 1
-    HARD = 2
+    LEVEL_0 = 0
+    LEVEL_1 = 1
+    LEVEL_2 = 2
 
     @classmethod
-    def from_string(cls, s: str) -> DifficultyLevel:
-        """Convert string to DifficultyLevel."""
-        mapping = {"easy": cls.EASY, "medium": cls.MEDIUM, "hard": cls.HARD}
-        return mapping.get(s.lower(), cls.MEDIUM)
-
-    def to_string(self) -> str:
-        """Convert to string."""
-        return ["easy", "medium", "hard"][self.value]
+    def from_int(cls, level: int) -> DifficultyLevel:
+        """Convert integer level to DifficultyLevel."""
+        if level <= 0:
+            return cls.LEVEL_0
+        elif level == 1:
+            return cls.LEVEL_1
+        else:
+            return cls.LEVEL_2
 
 
 @dataclass
 class CurriculumState:
     """Tracks curriculum learning state."""
 
-    current_level: DifficultyLevel = DifficultyLevel.EASY
+    current_level: DifficultyLevel = DifficultyLevel.LEVEL_0
     steps_at_level: int = 0
     successes_at_level: int = 0
     attempts_at_level: int = 0
@@ -62,7 +62,7 @@ class CurriculumScheduler:
         Initialize curriculum scheduler.
 
         Args:
-            warmup_steps: Steps to stay at EASY before considering advancement
+            warmup_steps: Steps to stay at level 0 before considering advancement
             advance_threshold: Success rate required to advance difficulty
             regress_threshold: Success rate below which to regress difficulty
             min_attempts_before_advance: Minimum attempts at level before advancing
@@ -80,30 +80,30 @@ class CurriculumScheduler:
         self._global_step = 0
 
     @property
-    def current_difficulty(self) -> str:
-        """Get current difficulty as string."""
-        return self._state.current_level.to_string()
+    def current_level_int(self) -> int:
+        """Get current level as integer."""
+        return self._state.current_level.value
 
     @property
     def current_level(self) -> DifficultyLevel:
         """Get current difficulty level."""
         return self._state.current_level
 
-    def get_difficulty_weights(self) -> dict[str, float]:
+    def get_level_weights(self) -> dict[int, float]:
         """
-        Get sampling weights for each difficulty.
+        Get sampling weights for each level.
 
         Returns weights that favor the current curriculum level
         while still sampling some tasks from other levels.
         """
         level = self._state.current_level
 
-        if level == DifficultyLevel.EASY:
-            return {"easy": 0.8, "medium": 0.2, "hard": 0.0}
-        elif level == DifficultyLevel.MEDIUM:
-            return {"easy": 0.2, "medium": 0.6, "hard": 0.2}
-        else:  # HARD
-            return {"easy": 0.1, "medium": 0.3, "hard": 0.6}
+        if level == DifficultyLevel.LEVEL_0:
+            return {0: 0.8, 1: 0.2, 2: 0.0}
+        elif level == DifficultyLevel.LEVEL_1:
+            return {0: 0.2, 1: 0.6, 2: 0.2}
+        else:  # LEVEL_2
+            return {0: 0.1, 1: 0.3, 2: 0.6}
 
     def record_episode(
         self,
@@ -121,8 +121,8 @@ class CurriculumScheduler:
             self._global_step = step
 
         # Only track if episode matches current curriculum level
-        episode_diff = DifficultyLevel.from_string(metrics.difficulty)
-        if episode_diff != self._state.current_level:
+        episode_level = DifficultyLevel.from_int(metrics.level)
+        if episode_level != self._state.current_level:
             return
 
         self._state.steps_at_level += 1
@@ -137,15 +137,15 @@ class CurriculumScheduler:
         Returns:
             True if difficulty was advanced
         """
-        # Still in warmup at EASY
+        # Still in warmup at LEVEL_0
         if (
-            self._state.current_level == DifficultyLevel.EASY
+            self._state.current_level == DifficultyLevel.LEVEL_0
             and self._global_step < self.warmup_steps
         ):
             return False
 
-        # Already at max difficulty
-        if self._state.current_level == DifficultyLevel.HARD:
+        # Already at max level
+        if self._state.current_level == DifficultyLevel.LEVEL_2:
             return False
 
         # Not enough attempts
@@ -169,8 +169,8 @@ class CurriculumScheduler:
         if not self.allow_regression:
             return False
 
-        # Already at min difficulty
-        if self._state.current_level == DifficultyLevel.EASY:
+        # Already at min level
+        if self._state.current_level == DifficultyLevel.LEVEL_0:
             return False
 
         # Not enough attempts
@@ -204,9 +204,9 @@ class CurriculumScheduler:
         return None
 
     def _advance_level(self) -> None:
-        """Advance to next difficulty level."""
+        """Advance to next level."""
         old_level = self._state.current_level
-        new_level = DifficultyLevel(min(old_level.value + 1, DifficultyLevel.HARD.value))
+        new_level = DifficultyLevel(min(old_level.value + 1, DifficultyLevel.LEVEL_2.value))
 
         self._state.level_history.append((self._global_step, old_level))
         self._state.current_level = new_level
@@ -215,9 +215,9 @@ class CurriculumScheduler:
         self._state.attempts_at_level = 0
 
     def _regress_level(self) -> None:
-        """Regress to previous difficulty level."""
+        """Regress to previous level."""
         old_level = self._state.current_level
-        new_level = DifficultyLevel(max(old_level.value - 1, DifficultyLevel.EASY.value))
+        new_level = DifficultyLevel(max(old_level.value - 1, DifficultyLevel.LEVEL_0.value))
 
         self._state.level_history.append((self._global_step, old_level))
         self._state.current_level = new_level

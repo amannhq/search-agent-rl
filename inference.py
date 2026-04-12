@@ -12,11 +12,9 @@ import json
 import os
 import re
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
 from openai import AsyncOpenAI, RateLimitError
 from openai.types.chat import (
     ChatCompletionMessageParam,
@@ -28,8 +26,6 @@ try:
     from .models import SearchAction
 except ImportError:
     from models import SearchAction
-
-load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env", override=False)
 
 
 def _load_search_env():
@@ -53,28 +49,29 @@ def _load_search_env():
 SearchEnv = _load_search_env()
 
 
-@dataclass
-class Config:
-    # The submission injects API_BASE_URL and API_KEY. We read them directly.
-    openai_base_url: str = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-    openai_api_key: str = os.getenv("API_KEY", "") or os.getenv("HF_TOKEN", "")
-    model_name: str = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
-    local_image_name: str = os.getenv("LOCAL_IMAGE_NAME", "")
-    env_base_url: str = os.getenv("ENV_BASE_URL", "")
-    benchmark: str = os.getenv("SEARCH_ENV_BENCHMARK", "search_env")
-    num_episodes: int = int(os.getenv("NUM_EPISODES", "1") or "1")
-    search_top_k: int = int(os.getenv("SEARCH_TOP_K", "5"))
-    read_top_k: int = int(os.getenv("READ_TOP_K", "2"))
-    temperature: float = float(os.getenv("TEMPERATURE", "0.2"))
-    max_tokens: int = int(os.getenv("MAX_COMPLETION_TOKENS", "350"))
-    max_retries: int = 4
-    char_limit: int = 800
-    soft_budget_threshold: float = 0.75
-    hard_budget_threshold: float = 0.95
-    prune_target_threshold: float = 0.60
+# ---------------------------------------------------------------------------
+# Configuration - simple module-level constants (like OpsArena)
+# ---------------------------------------------------------------------------
 
+BENCHMARK = os.getenv("SEARCH_ENV_BENCHMARK", "search_env")
+ENV_BASE_URL = os.getenv("ENV_BASE_URL", "")
+LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME", "")
 
-CFG = Config()
+# CRITICAL: These are injected by submission system
+API_BASE_URL = os.getenv("API_BASE_URL", "https://api.openai.com/v1")
+API_KEY = os.getenv("API_KEY") or os.getenv("HF_TOKEN", "")
+MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o-mini")
+
+NUM_EPISODES = int(os.getenv("NUM_EPISODES", "1") or "1")
+SEARCH_TOP_K = int(os.getenv("SEARCH_TOP_K", "5"))
+READ_TOP_K = int(os.getenv("READ_TOP_K", "2"))
+TEMPERATURE = float(os.getenv("TEMPERATURE", "0.2"))
+MAX_TOKENS = int(os.getenv("MAX_COMPLETION_TOKENS", "350"))
+MAX_RETRIES = 4
+CHAR_LIMIT = 800
+SOFT_BUDGET_THRESHOLD = 0.75
+HARD_BUDGET_THRESHOLD = 0.95
+PRUNE_TARGET_THRESHOLD = 0.60
 
 STOPWORDS = {
     "a", "an", "and", "are", "as", "at", "by", "did", "for", "from",
@@ -216,7 +213,7 @@ Budget thresholds:
 - 75%: Consider pruning low-relevance chunks
 - 95%: Must prune or answer (search/read blocked)
 
-Default top_k: {CFG.search_top_k}"""
+Default top_k: {SEARCH_TOP_K}"""
 
 
 # ---------------------------------------------------------------------------
@@ -232,7 +229,7 @@ class ActionBuilder:
         self.budget_pct: float = observation.budget_usage_percent / 100.0
 
     def search(self, query: str, top_k: int | None = None) -> tuple[SearchAction, str]:
-        k = top_k if top_k is not None else CFG.search_top_k
+        k = top_k if top_k is not None else SEARCH_TOP_K
         return SearchAction.make_search(query, k), f"search('{truncate(query, 40)}', k={k})"
 
     def read(self, chunk_ids: list[str]) -> tuple[SearchAction, str]:
@@ -289,13 +286,13 @@ class ActionBuilder:
         if len(self.context) < 2:
             return False
         return (
-            self.budget_pct >= CFG.hard_budget_threshold
-            or (self.budget_pct >= CFG.soft_budget_threshold and len(self.context) > 3)
+            self.budget_pct >= HARD_BUDGET_THRESHOLD
+            or (self.budget_pct >= SOFT_BUDGET_THRESHOLD and len(self.context) > 3)
         )
 
     def _prune_lowest(self) -> tuple[SearchAction, str]:
         sorted_chunks = sorted(self.context, key=lambda c: getattr(c, "score", 0))
-        target = int(self.obs.context_token_count * (1 - CFG.prune_target_threshold / self.budget_pct))
+        target = int(self.obs.context_token_count * (1 - PRUNE_TARGET_THRESHOLD / self.budget_pct))
         to_prune, freed = [], 0
         for chunk in sorted_chunks:
             if freed >= target:
@@ -314,7 +311,7 @@ class ActionBuilder:
         results = self.result.get("results", [])
         ids = [
             r["chunk_id"]
-            for r in results[: CFG.read_top_k]
+            for r in results[: READ_TOP_K]
             if r.get("chunk_id") and r["chunk_id"] not in self.context_ids
         ]
         return self.read(ids) if ids else self.answer(self._extract_answer())
@@ -356,13 +353,13 @@ def build_state(obs: Any, step: int, max_steps: int, full_context: dict[str, str
             "id": chunk.chunk_id,
             "title": truncate(chunk.title, 40),
             "tokens": chunk.token_count,
-            "text": truncate(text, CFG.char_limit),
+            "text": truncate(text, CHAR_LIMIT),
         })
 
     pct = obs.budget_usage_percent
-    if pct >= CFG.hard_budget_threshold * 100:
+    if pct >= HARD_BUDGET_THRESHOLD * 100:
         status = "CRITICAL - must prune or answer"
-    elif pct >= CFG.soft_budget_threshold * 100:
+    elif pct >= SOFT_BUDGET_THRESHOLD * 100:
         status = "high - consider pruning"
     else:
         status = "ok"
@@ -421,12 +418,12 @@ async def call_llm(
 ) -> Any:
     """Make a single LLM call. Raises on failure."""
     return await client.chat.completions.create(
-        model=CFG.model_name,
+        model=MODEL_NAME,
         messages=messages,
         tools=TOOLS,
         tool_choice="auto",
-        temperature=min(CFG.temperature, 0.1),
-        max_tokens=CFG.max_tokens + attempt_extra_tokens,
+        temperature=min(TEMPERATURE, 0.1),
+        max_tokens=MAX_TOKENS + attempt_extra_tokens,
     )
 
 
@@ -437,14 +434,14 @@ async def get_action(
 ) -> tuple[SearchAction, str, ChatCompletionMessageParam | None, str | None]:
     builder = ActionBuilder(obs)
 
-    for attempt in range(CFG.max_retries):
+    for attempt in range(MAX_RETRIES):
         try:
             completion = await call_llm(client, messages, attempt_extra_tokens=attempt * 64)
             message = completion.choices[0].message
             tool_calls = list(message.tool_calls or [])
 
             if not tool_calls:
-                if completion.choices[0].finish_reason == "length" and attempt < CFG.max_retries - 1:
+                if completion.choices[0].finish_reason == "length" and attempt < MAX_RETRIES - 1:
                     continue
                 raise ValueError("No tool call returned")
 
@@ -462,12 +459,13 @@ async def get_action(
             return action, action_str, assistant_msg, tool_id
 
         except RateLimitError:
-            if attempt < CFG.max_retries - 1:
+            if attempt < MAX_RETRIES - 1:
                 await asyncio.sleep(min(2.0 * (attempt + 1), 8.0))
             continue
 
-        except Exception:
-            if attempt < CFG.max_retries - 1:
+        except Exception as exc:
+            print(f"LLM error (attempt {attempt + 1}/{MAX_RETRIES}): {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+            if attempt < MAX_RETRIES - 1:
                 continue
             break
 
@@ -494,7 +492,7 @@ async def run_episode(env: Any, client: AsyncOpenAI) -> tuple[bool, int, float, 
     obs = result.observation
     max_steps = int(os.getenv("MAX_STEPS", "") or obs.max_steps or 20)
 
-    log_start(task=clean(obs.question)[:60], env=CFG.benchmark, model=CFG.model_name)
+    log_start(task=clean(obs.question)[:60], env=BENCHMARK, model=MODEL_NAME)
 
     messages: list[ChatCompletionMessageParam] = [
         {"role": "system", "content": SYSTEM},
@@ -563,33 +561,43 @@ async def run_episode(env: Any, client: AsyncOpenAI) -> tuple[bool, int, float, 
 # ---------------------------------------------------------------------------
 
 async def create_env() -> Any:
-    if CFG.local_image_name:
+    if LOCAL_IMAGE_NAME:
         env_keys = ["MAX_STEPS", "MAX_CONTEXT_TOKENS", "SEARCH_TOP_K"]
         env_vars = {k: v for k in env_keys if (v := os.getenv(k))}
-        return await SearchEnv.from_docker_image(CFG.local_image_name, env_vars=env_vars)
-    if CFG.env_base_url:
-        env = SearchEnv(base_url=CFG.env_base_url)
+        return await SearchEnv.from_docker_image(LOCAL_IMAGE_NAME, env_vars=env_vars)
+    if ENV_BASE_URL:
+        env = SearchEnv(base_url=ENV_BASE_URL)
         await env.connect()
         return env
     raise RuntimeError("Set LOCAL_IMAGE_NAME or ENV_BASE_URL")
 
 
 async def main() -> None:
+    # Validate required env vars for submission
+    if not API_KEY:
+        raise RuntimeError("API_KEY environment variable is required but not set")
+    if not API_BASE_URL:
+        raise RuntimeError("API_BASE_URL environment variable is required but not set")
+
+    print(f"Config: base_url={API_BASE_URL} model={MODEL_NAME} api_key={'set' if API_KEY else 'MISSING'}", file=sys.stderr, flush=True)
+
     env = None
     try:
         client = AsyncOpenAI(
-            base_url=CFG.openai_base_url,
-            api_key=CFG.openai_api_key or "no-key",
+            base_url=API_BASE_URL,
+            api_key=API_KEY,
         )
         env = await create_env()
-        for _ in range(CFG.num_episodes):
+        for _ in range(NUM_EPISODES):
             try:
                 await run_episode(env, client)
             except Exception:
                 log_end(success=False, steps=0, score=0.0, rewards=[])
-    except Exception:
-        log_start(task="error", env=CFG.benchmark, model=CFG.model_name)
+    except Exception as e:
+        print(f"Fatal error: {type(e).__name__}: {e}", file=sys.stderr, flush=True)
+        log_start(task="error", env=BENCHMARK, model=MODEL_NAME)
         log_end(success=False, steps=0, score=0.0, rewards=[])
+        raise
     finally:
         if env:
             try:

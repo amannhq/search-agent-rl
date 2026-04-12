@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "openenv-search_env"
 version = "0.1.0"
 description = "Search Env environment for OpenEnv"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "openenv-core[core]>=0.2.2",
     "openai>=2.31.0",
@@ -17,6 +17,25 @@ dependencies = [
 dev = [
     "pytest>=9.0.3",
     "pytest-cov>=4.0.0",
+]
+datagen = [
+    "anthropic>=0.75.0",
+    "chromadb>=1.4.0",
+    "tiktoken>=0.12.0",
+    "rich>=14.3.4",
+    "requests>=2.32.5",
+]
+datagen-web = [
+    "openenv-search_env[datagen]",
+]
+datagen-sec = [
+    "openenv-search_env[datagen]",
+]
+datagen-patents = [
+    "openenv-search_env[datagen]",
+    "python-docx>=1.2.0",
+    "pandas>=2.0.0",
+    "httpx[http2]>=0.28.1",
 ]
 
 [project.scripts]

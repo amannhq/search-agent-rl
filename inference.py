@@ -562,15 +562,60 @@ async def run_episode(env: Any, client: AsyncOpenAI) -> tuple[bool, int, float, 
 # Entry point
 # ---------------------------------------------------------------------------
 
+class LocalEnvWrapper:
+    """Wrapper to make local SearchEnvironment work like SearchEnv client."""
+
+    def __init__(self):
+        from searcharena import (
+            SearchEnvironment,
+            SearchEnvConfig,
+            create_sample_corpus,
+            create_sample_tasks,
+        )
+        from openenv.core.client_types import StepResult
+
+        config = SearchEnvConfig()
+        self._env = SearchEnvironment(
+            config=config,
+            corpus=create_sample_corpus(config),
+            tasks=create_sample_tasks(),
+        )
+        self._StepResult = StepResult
+
+    async def reset(self, **kwargs) -> Any:
+        obs = self._env.reset(**kwargs)
+        return self._StepResult(observation=obs, reward=0.0, done=False)
+
+    async def step(self, action: SearchAction) -> Any:
+        obs = self._env.step(action)
+        return self._StepResult(
+            observation=obs,
+            reward=obs.reward if obs.reward is not None else 0.0,
+            done=obs.done,
+        )
+
+    async def close(self) -> None:
+        self._env.close()
+
+    async def connect(self) -> None:
+        pass  # No-op for local env
+
+
 async def create_env() -> Any:
+    # Priority: LOCAL_IMAGE_NAME > ENV_BASE_URL > local in-process
     if LOCAL_IMAGE_NAME:
         env_keys = ["MAX_STEPS", "MAX_CONTEXT_TOKENS", "SEARCH_TOP_K"]
         env_vars = {k: v for k in env_keys if (v := os.getenv(k))}
         return await SearchEnv.from_docker_image(LOCAL_IMAGE_NAME, env_vars=env_vars)
-    # ENV_BASE_URL defaults to HF space if not set
-    env = SearchEnv(base_url=ENV_BASE_URL)
-    await env.connect()
-    return env
+
+    if os.getenv("ENV_BASE_URL"):  # Only if explicitly set
+        env = SearchEnv(base_url=ENV_BASE_URL)
+        await env.connect()
+        return env
+
+    # Default: run environment locally in-process (no network needed)
+    print("Using local in-process environment", file=sys.stderr, flush=True)
+    return LocalEnvWrapper()
 
 
 async def main() -> None:

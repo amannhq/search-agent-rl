@@ -1,20 +1,17 @@
-"""Search RL Environment Server Components."""
+"""
+Server package - FastAPI wrapper for SearchArena.
 
+This package contains only the server/API layer.
+All core logic lives in the searcharena package.
+"""
+
+from .app import app, create_environment
 from .environment import SearchEnvironment, create_sample_corpus, create_sample_tasks
-from .retrieval import BM25Index, DocumentCorpus
-from .rewards import BetaScheduler, RewardCalculator, RewardMetrics, TrajectoryTracker
 
 __all__ = [
-    # Environment
+    "app",
+    "create_environment",
     "SearchEnvironment",
     "create_sample_corpus",
     "create_sample_tasks",
-    # Retrieval
-    "BM25Index",
-    "DocumentCorpus",
-    # Rewards
-    "RewardCalculator",
-    "RewardMetrics",
-    "TrajectoryTracker",
-    "BetaScheduler",
 ]

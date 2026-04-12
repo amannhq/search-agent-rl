@@ -76,7 +76,34 @@ app = FastAPI(
     title="Search RL Environment",
     description="A stateful search environment for RL training",
     lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc",
 )
+
+
+@app.get("/")
+async def root() -> dict[str, Any]:
+    """Welcome page with API info."""
+    return {
+        "name": "Search RL Environment",
+        "description": "A stateful search environment for RL training",
+        "endpoints": {
+            "GET /": "This welcome page",
+            "GET /docs": "Interactive API documentation (Swagger UI)",
+            "GET /health": "Health check",
+            "GET /tasks": "List available tasks",
+            "GET /state": "Get current environment state",
+            "GET /schema": "Get action/observation schemas",
+            "POST /reset": "Reset environment and get first observation",
+            "POST /step": "Execute an action (search/read/prune/answer)",
+        },
+        "usage": {
+            "1_reset": "POST /reset to get a task",
+            "2_search": "POST /step with action_type='search' to find documents",
+            "3_read": "POST /step with action_type='read' to read chunks",
+            "4_answer": "POST /step with action_type='answer' to submit answer",
+        },
+    }
 
 
 @app.get("/health", response_model=HealthResponse)

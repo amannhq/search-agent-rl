@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from models import SearchAction, SearchEnvConfig
-from server.environment import SearchEnvironment
+from searcharena import SearchAction, SearchEnvConfig, SearchEnvironment
 
 
 class TestSearchEdgeCases:

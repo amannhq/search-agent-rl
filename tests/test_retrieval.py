@@ -1,7 +1,6 @@
 """Tests for BM25 search index and document corpus."""
 
-from models import Chunk
-from server.retrieval import BM25Index, DocumentCorpus
+from searcharena import BM25Index, Chunk, DocumentCorpus
 
 
 class TestBM25Index:

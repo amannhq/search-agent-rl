@@ -12,13 +12,14 @@ from collections.abc import Callable
 
 import pytest
 
-from models import SearchEnvConfig, SearchTask
-from server.environment import (
+from searcharena import (
+    DocumentCorpus,
+    SearchEnvConfig,
     SearchEnvironment,
+    SearchTask,
     create_sample_corpus,
     create_sample_tasks,
 )
-from server.retrieval import DocumentCorpus
 
 
 @pytest.fixture(scope="session")

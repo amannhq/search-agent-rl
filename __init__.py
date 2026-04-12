@@ -1,28 +1,22 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree.
-
 """Search RL Environment - Multi-hop document retrieval for training search agents."""
 
-try:
-    from .client import SearchEnv
-    from .models import (
-        ActionType,
-        AnswerActionPayload,
-        Chunk,
-        ChunkSummary,
-        PruneActionPayload,
-        ReadActionPayload,
-        SearchAction,
-        SearchActionPayload,
-        SearchEnvConfig,
-        SearchObservation,
-        SearchTask,
-    )
-except ImportError:
-    pass
+from searcharena import (
+    SearchEnv,
+    ActionType,
+    AnswerActionPayload,
+    Chunk,
+    ChunkSummary,
+    PruneActionPayload,
+    ReadActionPayload,
+    SearchAction,
+    SearchActionPayload,
+    SearchEnvConfig,
+    SearchObservation,
+    SearchTask,
+    SearchEnvironment,
+    create_sample_corpus,
+    create_sample_tasks,
+)
 
 __all__ = [
     "SearchEnv",
@@ -37,4 +31,7 @@ __all__ = [
     "SearchObservation",
     "SearchTask",
     "SearchEnvConfig",
+    "SearchEnvironment",
+    "create_sample_corpus",
+    "create_sample_tasks",
 ]

@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 # Ensure project root is on sys.path before project imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from collections.abc import Callable
 
@@ -62,11 +62,14 @@ def empty_corpus() -> DocumentCorpus:
 def custom_task() -> SearchTask:
     """Create a custom task for testing."""
     from searcharena.models import SupportingItem
+
     return SearchTask(
         task_id="custom_task",
         question="What is the meaning of life?",
         truth="42",
-        supporting_items=[SupportingItem(id="doc_test_chunk_0", reasoning="Contains the answer")],
+        supporting_items=[
+            SupportingItem(id="doc_test_chunk_0", reasoning="Contains the answer")
+        ],
         items_and_contents={"doc_test_chunk_0": "The answer to life is 42."},
         level=0,
     )

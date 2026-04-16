@@ -13,18 +13,16 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
 
 # Copy project files
 COPY pyproject.toml uv.lock ./
-COPY searcharena ./searcharena
-COPY sample ./sample
-COPY data ./data
-COPY server ./server
-COPY models.py ./
-COPY inference.py ./
+COPY README.md openenv.yaml ./
+COPY src ./src
+COPY docs ./docs
+COPY tools ./tools
 
 # Install dependencies
 RUN uv pip install --system -e .
 
 # Set environment variables
-ENV PYTHONPATH="/app:$PYTHONPATH"
+ENV PYTHONPATH="/app/src:$PYTHONPATH"
 
 # Expose port
 EXPOSE 8000
@@ -34,4 +32,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # Run the server
-CMD ["uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "searcharena.server.app:app", "--host", "0.0.0.0", "--port", "8000"]

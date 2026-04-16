@@ -35,7 +35,7 @@ curl -X POST https://aman045-openenv-search-rl.hf.space/step \
 ```python
 from searcharena import SearchEnv, SearchAction
 
-env = SearchEnv.from_docker_image("search_env:latest")
+env = SearchEnv.from_docker_image("searcharena:latest")
 
 obs = env.reset()
 print(obs.question)
@@ -73,26 +73,28 @@ Three difficulty levels:
 
 ```bash
 uv sync
-uvicorn server.app:app --reload
+uvicorn searcharena.server.app:app --reload
 ```
 
 Or with Docker:
 
 ```bash
-docker build -t search_env .
-docker run -p 8000:8000 search_env
+docker build -t searcharena .
+docker run -p 8000:8000 searcharena
 ```
 
 ## Project structure
 
 ```
-searcharena/          # Core package
-  engine/             # Environment logic
+src/searcharena/      # Canonical runtime package
+  env/                # Environment orchestration and state
+  retrieval/          # Retrieval backends and corpus layer
+  rewards/            # Reward calculation and tracking
+  server/             # FastAPI app factory and routers
+  tasks/              # Bundled tasks and loading helpers
   training/           # Training utilities
-  models.py           # Pydantic models
-server/               # FastAPI wrapper
-data/                 # Documents and tasks
-inference.py          # Baseline agent
+docs/                 # Architecture and design notes
+tools/                # Offline data generation and utilities
 ```
 
 ## Config
@@ -112,4 +114,3 @@ SearchEnvConfig(
 - `POST /reset` - New episode
 - `POST /step` - Execute action
 - `GET /health` - Health check
-- `WS /ws` - WebSocket

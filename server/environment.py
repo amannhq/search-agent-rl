@@ -27,7 +27,7 @@ class SearchEnvironment(Environment[SearchAction, SearchObservation, State]):
     This thin wrapper delegates all logic to searcharena.engine.SearchEnvironment.
     """
 
-    SUPPORTS_CONCURRENT_SESSIONS: bool = True
+    SUPPORTS_CONCURRENT_SESSIONS: bool = False
 
     def __init__(
         self,

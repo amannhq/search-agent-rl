@@ -1,12 +1,8 @@
 """Observation rendering."""
 
 from __future__ import annotations
-
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from ..models import Chunk, ChunkSummary, SearchObservation, SearchTask
-    from .rewards import TrajectoryTracker
+from ..models import Chunk, ChunkSummary, SearchObservation, SearchTask
+from .rewards import TrajectoryTracker
 
 
 def get_budget_warning(

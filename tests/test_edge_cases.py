@@ -153,6 +153,27 @@ class TestAnswerEdgeCases:
 class TestEpisodeEdgeCases:
     """Tests for episode lifecycle edge cases."""
 
+    def test_final_allowed_step_executes_before_termination(
+        self, env_with_config: Callable[[SearchEnvConfig], SearchEnvironment]
+    ) -> None:
+        """The last allowed step should run, then terminate the episode."""
+        config = SearchEnvConfig(max_steps=3)
+        env = env_with_config(config)
+        env.reset()
+
+        env.step(SearchAction.make_search("Instagram"))
+        env.step(SearchAction.make_search("WhatsApp"))
+        obs = env.step(SearchAction.make_search("Facebook"))
+
+        result = obs.action_result or {}
+        assert obs.step_count == 3
+        assert obs.action_type == "search"
+        assert obs.done is True
+        assert "results" in result
+        assert result.get("step_limit_reached") is True
+        assert result.get("termination_reason") == "max_steps"
+        assert "final_reward" in result
+
     def test_step_limit_ends_episode(
         self, env_with_config: Callable[[SearchEnvConfig], SearchEnvironment]
     ) -> None:

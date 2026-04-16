@@ -1,13 +1,10 @@
 """Core RL environment class."""
 
 from __future__ import annotations
-
 from typing import Any
 from uuid import uuid4
-
 from openenv.core.env_server.interfaces import Environment
 from openenv.core.env_server.types import State
-
 from .retrieval import DocumentCorpus
 from .rewards import BetaScheduler, RewardCalculator, RewardMetrics, TrajectoryTracker
 from .observations import create_observation
@@ -28,7 +25,7 @@ class SearchEnvironment(Environment):
     Rewards based on F-beta score and trajectory recall.
     """
 
-    SUPPORTS_CONCURRENT_SESSIONS: bool = True
+    SUPPORTS_CONCURRENT_SESSIONS: bool = False
 
     def __init__(
         self,
@@ -93,6 +90,63 @@ class SearchEnvironment(Environment):
         task = self.tasks[self._task_index % len(self.tasks)]
         self._task_index += 1
         return task
+
+    def _gold_chunk_ids(self) -> set[str]:
+        """Return gold supporting chunk IDs for the current task."""
+        if self._current_task is None:
+            return set()
+        return {item.id for item in self._current_task.supporting_items}
+
+    def _finalize_episode(
+        self,
+        *,
+        answer: str,
+        supporting_chunk_ids: list[str] | None = None,
+        action_result: dict[str, Any] | None = None,
+        termination_reason: str | None = None,
+    ) -> tuple[dict[str, Any], float]:
+        """
+        Finalize the current episode and compute terminal reward.
+
+        `action_result` can contain the result of the last non-terminal action.
+        Terminal reward metadata is merged into it so clients retain the last
+        action payload when an episode ends due to step limits.
+        """
+        self._done = True
+
+        if self._current_task is None:
+            final_result: dict[str, Any] = {
+                "answer_submitted": answer,
+                "supporting_chunk_ids": supporting_chunk_ids or [],
+                "final_reward": 0.001,
+            }
+            self._last_metrics = None
+            reward = 0.001
+        else:
+            final_result, self._last_metrics = handle_answer(
+                answer=answer,
+                supporting_chunk_ids=supporting_chunk_ids or [],
+                reward_calculator=self.reward_calculator,
+                tracker=self._tracker,
+                context_chunks=self._context_chunks,
+                context_token_count=self._context_token_count,
+                seen_texts=self._seen_texts,
+                gold_chunks=self._gold_chunk_ids(),
+                gold_answer=self._current_task.truth,
+                steps_used=self._state.step_count,
+                max_steps=self.config.max_steps,
+                max_tokens=self.config.max_context_tokens,
+            )
+            reward = self._last_metrics.total_reward if self._last_metrics else 0.001
+
+        merged_result = dict(action_result or {})
+        merged_result.update(final_result)
+
+        if termination_reason is not None:
+            merged_result["termination_reason"] = termination_reason
+            merged_result["step_limit_reached"] = termination_reason == "max_steps"
+
+        return merged_result, reward
 
     @property
     def _budget_usage(self) -> float:
@@ -166,6 +220,7 @@ class SearchEnvironment(Environment):
             self._current_task = self._get_next_task()
 
         if self._current_task is None:
+            self._done = True
             return SearchObservation(
                 question="No tasks available. Please add tasks to the environment.",
                 done=True,
@@ -202,107 +257,73 @@ class SearchEnvironment(Environment):
         reward = 0.0
         action_result: dict[str, Any] = {}
 
-        # Check step limit
-        if self._state.step_count >= self.config.max_steps:
-            self._done = True
-            action_result, self._last_metrics = handle_answer(
-                answer="",
-                supporting_chunk_ids=[],
-                reward_calculator=self.reward_calculator,
-                tracker=self._tracker,
-                context_chunks=self._context_chunks,
-                context_token_count=self._context_token_count,
-                seen_texts=self._seen_texts,
-                gold_chunks=set(item.id for item in self._current_task.supporting_items) if self._current_task else set(),
-                gold_answer=self._current_task.truth if self._current_task else "",
-                steps_used=self._state.step_count,
-                max_steps=self.config.max_steps,
-                max_tokens=self.config.max_context_tokens,
-            )
-            reward = self._last_metrics.total_reward if self._last_metrics else 0.001
-            return self._create_observation(
-                action_result=action_result,
-                action_type="timeout",
-                reward=reward,
-            )
-
         # Check budget constraint
         if (
             self._budget_usage >= self.config.hard_budget_threshold
             and action.action_type not in [ActionType.PRUNE, ActionType.ANSWER]
         ):
-            return self._create_observation(
-                action_result={
-                    "error": "Token budget exceeded. Only prune or answer allowed."
-                },
-                action_type=action.action_type.value,
-                reward=-0.1,
-            )
-
-        # Dispatch action
-        if action.action_type == ActionType.SEARCH:
-            if action.search is None:
-                action_result = {"error": "Missing search payload"}
-            else:
-                action_result = handle_search(
-                    query=action.search.query,
-                    top_k=action.search.top_k,
-                    corpus=self.corpus,
-                    tracker=self._tracker,
-                    chunks_seen=self._chunks_seen,
-                    seen_texts=self._seen_texts,
-                    deduplicate=self.config.deduplicate_searches,
-                    snippet_length=self.config.snippet_length,
-                )
-
-        elif action.action_type == ActionType.READ:
-            if action.read is None:
-                action_result = {"error": "Missing read payload"}
-            else:
-                action_result, self._context_token_count = handle_read(
-                    chunk_ids=action.read.chunk_ids,
-                    corpus=self.corpus,
-                    tracker=self._tracker,
-                    context_chunks=self._context_chunks,
-                    context_token_count=self._context_token_count,
-                    chunks_seen=self._chunks_seen,
-                    max_context_tokens=self.config.max_context_tokens,
-                )
-
-        elif action.action_type == ActionType.PRUNE:
-            if action.prune is None:
-                action_result = {"error": "Missing prune payload"}
-            else:
-                action_result, self._context_token_count = handle_prune(
-                    chunk_ids=action.prune.chunk_ids,
-                    tracker=self._tracker,
-                    context_chunks=self._context_chunks,
-                    context_token_count=self._context_token_count,
-                )
-
-        elif action.action_type == ActionType.ANSWER:
-            if action.answer is None:
-                action_result = {"error": "Missing answer payload"}
-            else:
-                self._done = True
-                if self._current_task is None:
-                    action_result = {"answer_submitted": action.answer.answer, "final_reward": 0.001}
+            action_result = {
+                "error": "Token budget exceeded. Only prune or answer allowed."
+            }
+            reward = -0.1
+        else:
+            # Dispatch action
+            if action.action_type == ActionType.SEARCH:
+                if action.search is None:
+                    action_result = {"error": "Missing search payload"}
                 else:
-                    action_result, self._last_metrics = handle_answer(
-                        answer=action.answer.answer,
-                        supporting_chunk_ids=action.answer.supporting_chunk_ids,
-                        reward_calculator=self.reward_calculator,
+                    action_result = handle_search(
+                        query=action.search.query,
+                        top_k=action.search.top_k,
+                        corpus=self.corpus,
+                        tracker=self._tracker,
+                        chunks_seen=self._chunks_seen,
+                        seen_texts=self._seen_texts,
+                        deduplicate=self.config.deduplicate_searches,
+                        snippet_length=self.config.snippet_length,
+                    )
+
+            elif action.action_type == ActionType.READ:
+                if action.read is None:
+                    action_result = {"error": "Missing read payload"}
+                else:
+                    action_result, self._context_token_count = handle_read(
+                        chunk_ids=action.read.chunk_ids,
+                        corpus=self.corpus,
                         tracker=self._tracker,
                         context_chunks=self._context_chunks,
                         context_token_count=self._context_token_count,
-                        seen_texts=self._seen_texts,
-                        gold_chunks=set(item.id for item in self._current_task.supporting_items),
-                        gold_answer=self._current_task.truth,
-                        steps_used=self._state.step_count,
-                        max_steps=self.config.max_steps,
-                        max_tokens=self.config.max_context_tokens,
+                        chunks_seen=self._chunks_seen,
+                        max_context_tokens=self.config.max_context_tokens,
                     )
-                    reward = self._last_metrics.total_reward if self._last_metrics else 0.001
+
+            elif action.action_type == ActionType.PRUNE:
+                if action.prune is None:
+                    action_result = {"error": "Missing prune payload"}
+                else:
+                    action_result, self._context_token_count = handle_prune(
+                        chunk_ids=action.prune.chunk_ids,
+                        tracker=self._tracker,
+                        context_chunks=self._context_chunks,
+                        context_token_count=self._context_token_count,
+                    )
+
+            elif action.action_type == ActionType.ANSWER:
+                if action.answer is None:
+                    action_result = {"error": "Missing answer payload"}
+                else:
+                    action_result, reward = self._finalize_episode(
+                        answer=action.answer.answer,
+                        supporting_chunk_ids=action.answer.supporting_chunk_ids,
+                    )
+
+        if not self._done and self._state.step_count >= self.config.max_steps:
+            action_result, reward = self._finalize_episode(
+                answer="",
+                supporting_chunk_ids=[],
+                action_result=action_result,
+                termination_reason="max_steps",
+            )
 
         return self._create_observation(
             action_result=action_result,

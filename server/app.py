@@ -150,8 +150,8 @@ async def reset(request: ResetRequest | None = None) -> ResetResponse:
 
     return ResetResponse(
         observation=obs.model_dump(),
-        reward=0.0,
-        done=False,
+        reward=obs.reward if obs.reward is not None else 0.0,
+        done=obs.done,
     )
 
 

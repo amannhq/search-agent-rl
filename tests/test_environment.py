@@ -52,9 +52,26 @@ class TestEnvironmentReset:
         assert len(obs.queries_issued) == 0
         assert obs.done is False
 
+    def test_reset_without_tasks_is_internally_terminal(self, empty_corpus) -> None:
+        """reset() with no tasks should also put internal state into done mode."""
+        env = SearchEnvironment(corpus=empty_corpus, tasks=[])
+
+        obs = env.reset()
+
+        assert obs.done is True
+        assert env._done is True
+
+        follow_up = env.step(SearchAction.make_search("after reset"))
+        assert follow_up.action_result is not None
+        assert "error" in follow_up.action_result
+
 
 class TestEnvironmentStep:
     """Tests for environment step functionality."""
+
+    def test_concurrent_sessions_flag_is_disabled(self) -> None:
+        """The runtime should not advertise concurrent sessions it cannot isolate."""
+        assert SearchEnvironment.SUPPORTS_CONCURRENT_SESSIONS is False
 
     def test_search_action_returns_results(self, env: SearchEnvironment) -> None:
         """Search action should return relevant results."""

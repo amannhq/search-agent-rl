@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any, TYPE_CHECKING
+from typing import Any
 
-if TYPE_CHECKING:
-    from ..models import Chunk
-    from .rewards import RewardCalculator, RewardMetrics, TrajectoryTracker
-    from .retrieval import DocumentCorpus
+from ..models import Chunk
+from .rewards import RewardCalculator, RewardMetrics, TrajectoryTracker
+from .retrieval import DocumentCorpus
 
 
 def handle_search(
@@ -63,8 +62,6 @@ def handle_read(
     Returns:
         Tuple of (action_result dict, new context_token_count)
     """
-    from ..models import Chunk
-
     chunks_added: list[Chunk] = []
     tokens_added = 0
     budget_exceeded = False

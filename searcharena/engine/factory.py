@@ -1,12 +1,8 @@
 """Factory functions for corpus and tasks."""
 
 from __future__ import annotations
-
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from ..models import SearchEnvConfig, SearchTask
-    from .retrieval import DocumentCorpus
+from ..models import SearchEnvConfig, SearchTask
+from .retrieval import DocumentCorpus
 
 
 def create_sample_corpus(

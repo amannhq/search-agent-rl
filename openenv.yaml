@@ -2,6 +2,5 @@ spec_version: 1
 name: search_env
 type: space
 runtime: fastapi
-app: server.app:app
+app: searcharena.server.app:app
 port: 8000
-

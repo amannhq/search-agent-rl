@@ -3,14 +3,16 @@ requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "openenv-search_env"
+name = "searcharena"
 version = "0.1.0"
-description = "Search Env environment for OpenEnv"
+description = "SearchArena environment for OpenEnv"
 requires-python = ">=3.11"
 dependencies = [
+    "fastapi>=0.115.0",
     "openenv-core[core]>=0.2.2",
     "openai>=2.31.0",
     "python-dotenv>=1.0.0",
+    "uvicorn>=0.30.0",
 ]
 
 [project.optional-dependencies]
@@ -26,28 +28,34 @@ datagen = [
     "requests>=2.32.5",
 ]
 datagen-web = [
-    "openenv-search_env[datagen]",
+    "searcharena[datagen]",
 ]
 datagen-sec = [
-    "openenv-search_env[datagen]",
+    "searcharena[datagen]",
 ]
 datagen-patents = [
-    "openenv-search_env[datagen]",
+    "searcharena[datagen]",
     "python-docx>=1.2.0",
     "pandas>=2.0.0",
     "httpx[http2]>=0.28.1",
 ]
 
 [project.scripts]
-server = "search_env.server.app:main"
-inference = "search_env.inference:cli"
+server = "searcharena.server.app:main"
+inference = "searcharena.cli.inference:main"
 
 [tool.setuptools]
 include-package-data = true
-packages = ["search_env", "search_env.server"]
-package-dir = { "search_env" = ".", "search_env.server" = "server" }
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["searcharena*"]
+
+[tool.setuptools.package-data]
+"searcharena.tasks.resources.sample" = ["*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = ["src"]
 addopts = "-v"

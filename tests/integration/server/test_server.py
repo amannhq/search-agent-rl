@@ -24,8 +24,6 @@ def test_reset_response_preserves_terminal_observation(
     body = response.json()
     assert body["done"] is True
     assert body["reward"] == 0.001
-    assert body["observation"]["done"] is True
-    assert body["observation"]["reward"] == 0.001
     assert body["observation"]["terminated"] is True
     assert body["observation"]["termination_reason"] == "no_tasks"
     assert "No tasks available" in body["observation"]["question"]

@@ -72,18 +72,37 @@ class EnvironmentManager:
             self._environments[session_id] = env
         return env
 
+    def create_environment(self) -> SearchEnvironment:
+        """Create a fresh environment instance for one transport session."""
+        return self.factory()
+
     def list_task_summaries(self, session_id: str = "default") -> list[dict[str, Any]]:
         """Return task metadata for one session."""
-        env = self.get(session_id)
-        return [
-            {
-                "task_id": task.task_id,
-                "level": task.level,
-                "domain": task.domain,
-                "question": task.question,
-            }
-            for task in env.tasks
-        ]
+        if session_id in self._environments:
+            env = self._environments[session_id]
+            return [
+                {
+                    "task_id": task.task_id,
+                    "level": task.level,
+                    "domain": task.domain,
+                    "question": task.question,
+                }
+                for task in env.tasks
+            ]
+
+        env = self.create_environment()
+        try:
+            return [
+                {
+                    "task_id": task.task_id,
+                    "level": task.level,
+                    "domain": task.domain,
+                    "question": task.question,
+                }
+                for task in env.tasks
+            ]
+        finally:
+            env.close()
 
     def close_all(self) -> None:
         """Close every managed environment."""

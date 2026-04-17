@@ -12,6 +12,7 @@ class ChunkReranker(Protocol):
 
     def rerank(self, query: str, results: list[ChunkSummary]) -> list[ChunkSummary]:
         """Return reranked results."""
+        ...
 
 
 class NoOpReranker:

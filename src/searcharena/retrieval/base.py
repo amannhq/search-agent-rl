@@ -18,12 +18,15 @@ class ChunkRetriever(Protocol):
         snippet_length: int = 200,
     ) -> list[ChunkSummary]:
         """Search for chunk summaries."""
+        ...
 
     def get_chunk(self, chunk_id: str) -> Chunk | None:
         """Fetch one chunk."""
+        ...
 
     def get_chunks(self, chunk_ids: list[str]) -> list[Chunk]:
         """Fetch many chunks."""
+        ...
 
 
 class TokenCounter(Protocol):
@@ -31,3 +34,4 @@ class TokenCounter(Protocol):
 
     def estimate_tokens(self, text: str) -> int:
         """Estimate tokens for a string."""
+        ...

@@ -37,6 +37,14 @@ class TestEnvironmentReset:
         obs = env.reset(task=custom_task)
         assert obs.question == "What is the meaning of life?"
 
+    def test_reset_with_task_id(self, env: SearchEnvironment, tasks: list) -> None:
+        """reset() should accept a task_id from websocket clients."""
+        chosen = tasks[-1]
+
+        obs = env.reset(task_id=chosen.task_id)
+
+        assert obs.question == chosen.question
+
     def test_reset_clears_previous_episode_state(self, env: SearchEnvironment) -> None:
         """reset() should clear state from previous episode."""
         # Run an episode

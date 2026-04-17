@@ -6,6 +6,13 @@ import os
 import re
 from dataclasses import dataclass, field
 
+from dotenv import find_dotenv, load_dotenv
+
+
+_DOTENV_PATH = find_dotenv(usecwd=True)
+if _DOTENV_PATH:
+    load_dotenv(_DOTENV_PATH, override=False)
+
 
 @dataclass
 class InferenceConfig:

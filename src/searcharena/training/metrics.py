@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field
+from importlib import import_module
 from pathlib import Path
 from typing import Any
 
@@ -196,10 +197,9 @@ class MetricsLogger:
         self._wandb = None
         if use_wandb:
             try:
-                import wandb
-                self._wandb = wandb
+                self._wandb = import_module("wandb")
                 if wandb_project:
-                    wandb.init(project=wandb_project, name=run_name)
+                    self._wandb.init(project=wandb_project, name=run_name)
             except ImportError:
                 print("Warning: wandb not installed, disabling W&B logging")
                 self.use_wandb = False
@@ -245,8 +245,8 @@ class MetricsLogger:
         step = step or self._step
 
         if self._wandb and self.use_wandb:
-            import wandb
-            self._wandb.log({name: wandb.Histogram(values)}, step=step)
+            histogram = self._wandb.Histogram(values)
+            self._wandb.log({name: histogram}, step=step)
 
     def print_summary(self, metrics: TrainingMetrics) -> None:
         """Print a formatted summary to console."""

@@ -216,6 +216,7 @@ class SearchEnvironment(Environment):
         seed: int | None = None,
         episode_id: str | None = None,
         task: SearchTask | None = None,
+        task_id: str | None = None,
         **kwargs: Any,
     ) -> SearchObservation:
         """Reset to a fresh episode."""
@@ -224,6 +225,11 @@ class SearchEnvironment(Environment):
 
         if task is not None:
             self.episode.current_task = task
+        elif task_id is not None:
+            self.episode.current_task = next(
+                (candidate for candidate in self.tasks if candidate.task_id == task_id),
+                None,
+            )
         else:
             self.episode.current_task = self._get_next_task(seed)
 
@@ -310,4 +316,3 @@ class SearchEnvironment(Environment):
             description="Multi-hop document retrieval environment for search agents.",
             version="0.1.0",
         )
-

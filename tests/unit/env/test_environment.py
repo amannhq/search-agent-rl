@@ -82,6 +82,10 @@ class TestEnvironmentStep:
         """The runtime should not advertise concurrent sessions it cannot isolate."""
         assert SearchEnvironment.SUPPORTS_CONCURRENT_SESSIONS is False
 
+    def test_concurrent_sessions_flag_is_disabled(self) -> None:
+        """The runtime should not advertise concurrent sessions it cannot isolate."""
+        assert SearchEnvironment.SUPPORTS_CONCURRENT_SESSIONS is False
+
     def test_search_action_returns_results(self, env: SearchEnvironment) -> None:
         """Search action should return relevant results."""
         env.reset()
